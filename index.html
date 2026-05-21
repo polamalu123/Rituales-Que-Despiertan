@@ -31,7 +31,7 @@ const CP_ZONA = {'57130':'Neza','57138':'Neza','57120':'Neza','57129':'Neza','57
 const CATS = ["Veladoras","Incienso","Protecciones","Hierbas en té","Hierbas para baño","Sales","Esencias y concentrados","Alcoholes","Accesorios","Cuarzos"];
 const STATUS_LABELS = {nuevo:"🆕 Nuevo",confirmado:"✅ Confirmado",enviado:"🚚 Enviado",entregado:"🏠 Entregado",cancelado:"❌ Cancelado"};
 const STATUS_COLORS = {nuevo:"#c8902a",confirmado:"#2d7a2d",enviado:"#1a6fa0",entregado:"#5a3d8a",cancelado:"#c0392b"};
-const PIN_ADMIN = "5783";
+const PIN_ADMIN = localStorage.getItem("aether_pin") || "1234";
 const folio = () => "AE"+Date.now().toString(36).toUpperCase().slice(-6);
 
 const S = (props) => <span style={props.s||{}}>{props.children}</span>;
@@ -282,7 +282,11 @@ function Admin({onSalir}){
     showToast("✦ Status actualizado");
   };
 
-  const guardarProd=async(form)=>{
+  const eliminarProd=async(id)=>{
+    await fetch(`${SUPABASE_URL}/rest/v1/productos?id=eq.${id}`,{method:"DELETE",headers:hdrs()});
+    setProductos(pr=>pr.filter(p=>p.id!==id));
+    setEditProd(null);showToast("Producto eliminado");
+  };
     const d={nombre:form.nombre,descripcion:form.descripcion,precio:Number(form.precio),stock:Number(form.stock),categoria:form.categoria,emoji:form.emoji,activo:form.activo};
     if(form.id){await mutate("productos","PATCH",d,`?id=eq.${form.id}`);setProductos(pr=>pr.map(p=>p.id===form.id?{...p,...d}:p));}
     else{const n=await mutate("productos","POST",d);if(Array.isArray(n))setProductos(pr=>[...pr,n[0]]);}
@@ -375,7 +379,7 @@ function Admin({onSalir}){
       </div>
 
       {detalle&&<DetallePedido pedido={detalle} onCerrar={()=>setDetalle(null)} onCambiarStatus={cambiarStatus}/>}
-      {editProd&&<EditorProducto prod={editProd} onGuardar={guardarProd} onCerrar={()=>setEditProd(null)}/>}
+      {editProd&&<EditorProducto prod={editProd} onGuardar={guardarProd} onCerrar={()=>setEditProd(null)} onEliminar={eliminarProd}/>}
       {toast&&<Toast msg={toast}/>}
     </div>
   );
@@ -423,33 +427,92 @@ function DetallePedido({pedido,onCerrar,onCambiarStatus}){
   );
 }
 
-function EditorProducto({prod,onGuardar,onCerrar}){
+function EditorProducto({prod,onGuardar,onCerrar,onEliminar}){
   const [form,setForm]=useState({...prod});
+  const [subiendo,setSubiendo]=useState(false);
+  const [elimConf,setElimConf]=useState(false);
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
+
+  const subirFoto=async(e)=>{
+    const file=e.target.files[0];
+    if(!file)return;
+    setSubiendo(true);
+    try{
+      const ext=file.name.split(".").pop();
+      const nombre=`prod_${Date.now()}.${ext}`;
+      const r=await fetch(`${SUPABASE_URL}/storage/v1/object/productos/${nombre}`,{
+        method:"POST",
+        headers:{"apikey":SUPABASE_KEY,"Authorization":`Bearer ${SUPABASE_KEY}`,"Content-Type":file.type,"x-upsert":"true"},
+        body:file
+      });
+      if(r.ok){
+        const url=`${SUPABASE_URL}/storage/v1/object/public/productos/${nombre}`;
+        set("imagen_url",url);
+      } else {
+        alert("Error al subir foto. Verifica que el bucket 'productos' esté creado en Supabase Storage.");
+      }
+    }catch(e){alert("Error de conexión al subir foto.");}
+    setSubiendo(false);
+  };
+
   return(
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:500,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
-      <div style={{background:"#faf7f2",borderRadius:"24px 24px 0 0",width:"100%",maxWidth:480,maxHeight:"88vh",overflowY:"auto",padding:"24px 20px 32px"}}>
+      <div style={{background:"#faf7f2",borderRadius:"24px 24px 0 0",width:"100%",maxWidth:480,maxHeight:"92vh",overflowY:"auto",padding:"24px 20px 32px"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-          <h3 style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.4rem"}}>{form.id?"Editar":"Nuevo producto"}</h3>
+          <h3 style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.4rem"}}>{form.id?"Editar producto":"Nuevo producto"}</h3>
           <button onClick={onCerrar} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:"#7a6e60"}}>✕</button>
         </div>
-        {[{l:"Nombre",k:"nombre"},{l:"Descripción",k:"descripcion"},{l:"Precio ($)",k:"precio",n:true},{l:"Stock",k:"stock",n:true},{l:"Emoji",k:"emoji"}].map(f=>(
+
+        {/* FOTO */}
+        <div style={{marginBottom:20,textAlign:"center"}}>
+          <div style={{width:120,height:120,margin:"0 auto 10px",borderRadius:16,background:form.imagen_url?`url(${form.imagen_url}) center/cover`:"#f0ecf5",backgroundSize:"cover",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"3rem",border:"2px dashed #e0d8cc",overflow:"hidden"}}>
+            {!form.imagen_url&&(form.emoji||"📷")}
+          </div>
+          <label style={{display:"inline-block",padding:"8px 20px",background:"#c8902a",color:"white",borderRadius:50,fontSize:13,cursor:"pointer",fontWeight:500}}>
+            {subiendo?"Subiendo…":"📷 "+(form.imagen_url?"Cambiar foto":"Subir foto")}
+            <input type="file" accept="image/*" onChange={subirFoto} style={{display:"none"}} disabled={subiendo}/>
+          </label>
+          {form.imagen_url&&(
+            <button onClick={()=>set("imagen_url",null)} style={{display:"block",margin:"8px auto 0",fontSize:12,color:"#999",background:"none",border:"none",cursor:"pointer",textDecoration:"underline"}}>
+              Quitar foto
+            </button>
+          )}
+        </div>
+
+        {/* CAMPOS */}
+        {[{l:"Nombre",k:"nombre"},{l:"Descripción",k:"descripcion"},{l:"Precio ($)",k:"precio",n:true},{l:"Stock",k:"stock",n:true},{l:"Emoji (se muestra si no hay foto)",k:"emoji"}].map(f=>(
           <div key={f.k} style={{marginBottom:12}}>
             <label style={{fontSize:12,color:"#7a6e60",display:"block",marginBottom:4}}>{f.l}</label>
-            <input type={f.n?"number":"text"} value={form[f.k]} onChange={e=>set(f.k,f.n?Number(e.target.value):e.target.value)} style={{...inp()}}/>
+            <input type={f.n?"number":"text"} value={form[f.k]||""} onChange={e=>set(f.k,f.n?Number(e.target.value):e.target.value)} style={{...inp()}}/>
           </div>
         ))}
+
         <div style={{marginBottom:12}}>
           <label style={{fontSize:12,color:"#7a6e60",display:"block",marginBottom:4}}>Categoría</label>
           <select value={form.categoria} onChange={e=>set("categoria",e.target.value)} style={{...inp()}}>
             {CATS.map(c=><option key={c}>{c}</option>)}
           </select>
         </div>
-        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:20}}>
-          <input type="checkbox" checked={form.activo} onChange={e=>set("activo",e.target.checked)}/>
-          <span style={{fontSize:14}}>Visible en tienda</span>
+
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:24}}>
+          <input type="checkbox" id="act" checked={form.activo} onChange={e=>set("activo",e.target.checked)} style={{width:16,height:16}}/>
+          <label htmlFor="act" style={{fontSize:14,cursor:"pointer"}}>Visible en tienda</label>
         </div>
-        <button onClick={()=>onGuardar(form)} style={{...btn()}}>Guardar</button>
+
+        <button onClick={()=>onGuardar(form)} style={{...btn(),marginBottom:10}}>Guardar cambios</button>
+
+        {form.id&&!elimConf&&(
+          <button onClick={()=>setElimConf(true)} style={{...btn("transparent",{color:"#c0392b",border:"1.5px solid #c0392b"})}}>Eliminar producto</button>
+        )}
+        {elimConf&&(
+          <div style={{background:"rgba(192,57,43,0.06)",border:"1px solid rgba(192,57,43,0.2)",borderRadius:12,padding:"14px 16px",textAlign:"center"}}>
+            <div style={{fontSize:13,marginBottom:12,color:"#c0392b"}}>¿Seguro que quieres eliminar este producto?</div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>onEliminar(form.id)} style={{...btn("#c0392b",{flex:1})}}>Sí, eliminar</button>
+              <button onClick={()=>setElimConf(false)} style={{...btn("transparent",{flex:1,color:"#2e2416",border:"1.5px solid #e0d8cc"})}}>Cancelar</button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -457,18 +520,48 @@ function EditorProducto({prod,onGuardar,onCerrar}){
 
 function ConfigForm({config,onGuardar}){
   const [items,setItems]=useState(config.map(c=>({...c})));
+  const [pinActual,setPinActual]=useState("");
+  const [pinNuevo,setPinNuevo]=useState("");
+  const [pinConfirm,setPinConfirm]=useState("");
+  const [pinMsg,setPinMsg]=useState("");
   const labels={whatsapp:"WhatsApp (con código de país)",banco:"Banco",titular:"Titular de cuenta",clabe:"CLABE (18 dígitos)",cuenta:"Número de cuenta",concepto:"Concepto de pago"};
   const set=(clave,valor)=>setItems(pr=>pr.map(i=>i.clave===clave?{...i,valor}:i));
+
+  const cambiarPin=()=>{
+    const pinGuardado=localStorage.getItem("aether_pin")||"1234";
+    if(pinActual!==pinGuardado){setPinMsg("❌ PIN actual incorrecto");return;}
+    if(pinNuevo.length<4){setPinMsg("❌ El PIN debe tener al menos 4 dígitos");return;}
+    if(pinNuevo!==pinConfirm){setPinMsg("❌ Los PINs no coinciden");return;}
+    localStorage.setItem("aether_pin",pinNuevo);
+    setPinActual("");setPinNuevo("");setPinConfirm("");
+    setPinMsg("✅ PIN cambiado correctamente");
+    setTimeout(()=>setPinMsg(""),3000);
+  };
+
   return(
-    <div style={{background:"white",borderRadius:16,border:"1px solid #e0d8cc",padding:20}}>
-      <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.3rem",marginBottom:20}}>Cuenta bancaria y contacto</div>
-      {items.map(item=>(
-        <div key={item.clave} style={{marginBottom:14}}>
-          <label style={{fontSize:12,color:"#7a6e60",display:"block",marginBottom:4}}>{labels[item.clave]||item.clave}</label>
-          <input value={item.valor||""} onChange={e=>set(item.clave,e.target.value)} style={{...inp(),background:"#faf7f2"}}/>
-        </div>
-      ))}
-      <button onClick={()=>onGuardar(items)} style={{...btn(),marginTop:4}}>Guardar configuración</button>
+    <div>
+      <div style={{background:"white",borderRadius:16,border:"1px solid #e0d8cc",padding:20,marginBottom:16}}>
+        <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.3rem",marginBottom:20}}>Cuenta bancaria y contacto</div>
+        {items.map(item=>(
+          <div key={item.clave} style={{marginBottom:14}}>
+            <label style={{fontSize:12,color:"#7a6e60",display:"block",marginBottom:4}}>{labels[item.clave]||item.clave}</label>
+            <input value={item.valor||""} onChange={e=>set(item.clave,e.target.value)} style={{...inp(),background:"#faf7f2"}}/>
+          </div>
+        ))}
+        <button onClick={()=>onGuardar(items)} style={{...btn(),marginTop:4}}>Guardar configuración</button>
+      </div>
+
+      <div style={{background:"white",borderRadius:16,border:"1px solid #e0d8cc",padding:20}}>
+        <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.3rem",marginBottom:20}}>🔐 Cambiar PIN de admin</div>
+        {[{l:"PIN actual",v:pinActual,s:setPinActual},{l:"PIN nuevo",v:pinNuevo,s:setPinNuevo},{l:"Confirmar PIN nuevo",v:pinConfirm,s:setPinConfirm}].map(f=>(
+          <div key={f.l} style={{marginBottom:12}}>
+            <label style={{fontSize:12,color:"#7a6e60",display:"block",marginBottom:4}}>{f.l}</label>
+            <input type="password" value={f.v} onChange={e=>f.s(e.target.value)} maxLength={10} style={{...inp(),letterSpacing:"0.2em"}}/>
+          </div>
+        ))}
+        {pinMsg&&<div style={{padding:"8px 12px",borderRadius:10,background:pinMsg.startsWith("✅")?"rgba(34,139,34,0.08)":"rgba(200,50,50,0.08)",border:`1px solid ${pinMsg.startsWith("✅")?"rgba(34,139,34,0.2)":"rgba(200,50,50,0.2)"}`,fontSize:13,marginBottom:12,color:pinMsg.startsWith("✅")?"#2d7a2d":"#c0392b"}}>{pinMsg}</div>}
+        <button onClick={cambiarPin} style={{...btn()}}>Cambiar PIN</button>
+      </div>
     </div>
   );
 }
@@ -478,7 +571,8 @@ function App(){
   const [vista,setVista]=useState("tienda");
   const [pin,setPin]=useState("");
   const [pinErr,setPinErr]=useState(false);
-  const entrar=()=>{if(pin===PIN_ADMIN){setVista("admin");setPin("");setPinErr(false);}else{setPinErr(true);setPin("");}};
+  const getPin=()=>localStorage.getItem("aether_pin")||"1234";
+  const entrar=()=>{if(pin===getPin()){setVista("admin");setPin("");setPinErr(false);}else{setPinErr(true);setPin("");}};
   if(vista==="pin")return(
     <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#1a1208",flexDirection:"column",gap:20,padding:24}}>
       <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"2rem",color:"#e0aa4a"}}>☽ Admin</div>
