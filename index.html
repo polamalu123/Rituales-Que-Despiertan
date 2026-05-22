@@ -22,7 +22,7 @@ const {useState,useEffect,useCallback,useRef}=React;
 /* ── CONFIG ── */
 const SB_URL="https://utwpumtpgcolkavqbmmh.supabase.co";
 const SB_KEY="sb_publishable_Y4ktViRftcIlT5hNWmskQg_lvwBSUje";
-const getPin=()=>localStorage.getItem("aether_pin")||"1234";
+const BUCKET="Im%C3%A1genes";
 
 const hdrs=()=>({"apikey":SB_KEY,"Authorization":"Bearer "+SB_KEY,"Content-Type":"application/json"});
 const db=async(table,params="")=>{const r=await fetch(SB_URL+"/rest/v1/"+table+params,{headers:hdrs()});return r.json();};
@@ -465,13 +465,13 @@ function EditorProd({prod,onGuardar,onClose,onElim}){
     try{
       const ext=file.name.split(".").pop();
       const nom="prod_"+Date.now()+"."+ext;
-      const r=await fetch(SB_URL+"/storage/v1/object/productos/"+nom,{
+      const r=await fetch(SB_URL+"/storage/v1/object/"+BUCKET+"/"+nom,{
         method:"POST",
         headers:{"apikey":SB_KEY,"Authorization":"Bearer "+SB_KEY,"Content-Type":file.type,"x-upsert":"true"},
         body:file
       });
-      if(r.ok)s("imagen_url",SB_URL+"/storage/v1/object/public/productos/"+nom);
-      else alert("Error al subir. Verifica que el bucket 'productos' esté creado y sea público en Supabase Storage.");
+      if(r.ok)s("imagen_url",SB_URL+"/storage/v1/object/public/"+BUCKET+"/"+nom);
+      else alert("Error al subir foto: "+(await r.text()));
     }catch(e){alert("Error de conexión.");}
     setSub(false);
   };
