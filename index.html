@@ -22,7 +22,7 @@ const {useState,useEffect,useCallback,useRef}=React;
 /* ── CONFIG ── */
 const SB_URL="https://utwpumtpgcolkavqbmmh.supabase.co";
 const SB_KEY="sb_publishable_Y4ktViRftcIlT5hNWmskQg_lvwBSUje";
-const BUCKET="Im%C3%A1genes";
+const BUCKET="1234";
 
 const hdrs=()=>({"apikey":SB_KEY,"Authorization":"Bearer "+SB_KEY,"Content-Type":"application/json"});
 const db=async(table,params="")=>{const r=await fetch(SB_URL+"/rest/v1/"+table+params,{headers:hdrs()});return r.json();};
