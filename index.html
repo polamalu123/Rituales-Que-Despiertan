@@ -583,7 +583,19 @@ function App(){
   const [vista,setVista]=useState("tienda");
   const [pin,setPin]=useState("");
   const [err,setErr]=useState(false);
-  const entrar=()=>{if(pin===getPin()){setVista("admin");setPin("");setErr(false);}else{setErr(true);setPin("");}};
+  
+  const entrar=()=>{
+    const pinGuardado=localStorage.getItem("aether_pin")||"1234";
+    if(pin===pinGuardado){
+      setVista("admin");
+      setPin("");
+      setErr(false);
+    }else{
+      setErr(true);
+      setPin("");
+    }
+  };
+
   if(vista==="pin")return(
     <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#1a1208",flexDirection:"column",gap:20,padding:24}}>
       <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"2rem",color:"#e0aa4a"}}>☽ Admin</div>
@@ -591,7 +603,7 @@ function App(){
         style={{padding:"12px 20px",border:"2px solid "+(err?"#c0392b":"rgba(200,144,42,0.3)"),borderRadius:50,background:"transparent",color:"white",fontSize:18,outline:"none",textAlign:"center",letterSpacing:"0.3em",width:200}}/>
       {err&&<div style={{color:"#e74c3c",fontSize:13}}>PIN incorrecto</div>}
       <button onClick={entrar} style={{padding:"12px 32px",background:"#c8902a",color:"white",border:"none",borderRadius:50,fontSize:14,cursor:"pointer",fontWeight:500}}>Entrar</button>
-      <button onClick={()=>setVista("tienda")} style={{color:"rgba(240,220,180,0.4)",background:"none",border:"none",cursor:"pointer",fontSize:13}}>Volver</button>
+      <button onClick={()=>{setVista("tienda");setPin("");setErr(false);}} style={{color:"rgba(240,220,180,0.4)",background:"none",border:"none",cursor:"pointer",fontSize:13}}>Volver</button>
     </div>
   );
   if(vista==="admin")return <Admin onSalir={()=>setVista("tienda")}/>;
