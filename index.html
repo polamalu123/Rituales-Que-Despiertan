@@ -471,7 +471,7 @@ function EditorProd({prod,onGuardar,onClose,onElim}){
         body:file
       });
       if(r.ok)s("imagen_url",SB_URL+"/storage/v1/object/public/"+BUCKET+"/"+nom);
-      else alert("Error al subir foto: "+(await r.text()));
+      else{const err=await r.text();alert("Error "+r.status+": "+err);}
     }catch(e){alert("Error de conexión.");}
     setSub(false);
   };
