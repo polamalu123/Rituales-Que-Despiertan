@@ -206,7 +206,7 @@ function Tienda({onAdmin}){
               </div>
               <input value={addr.refs} onChange={e=>setAddr(a=>({...a,refs:e.target.value}))} placeholder="Referencias" style={{...I()}}/>
               {cpSt==="in"&&<div style={{marginTop:8,padding:"8px 12px",background:"rgba(34,139,34,0.08)",border:"1px solid rgba(34,139,34,0.2)",borderRadius:10,fontSize:12,color:"#2d7a2d"}}>✅ Zona con cobertura — Envío sin costo</div>}
-              {cpSt==="out"&&<div style={{marginTop:8,padding:"8px 12px",background:"rgba(200,144,42,0.08)",border:"1px solid rgba(200,144,42,0.25)",borderRadius:10,fontSize:12,color:"#8a6010"}}>📦 Fuera de zona — Envío por paquetería</div>}
+              {cpSt==="out"&&<div style={{marginTop:8,padding:"8px 12px",background:"rgba(200,144,42,0.08)",border:"1px solid rgba(200,144,42,0.25)",borderRadius:10,fontSize:12,color:"#8a6010"}}>📦 Fuera de zona — Envío por paquetería al confirmar tu pedido el equipo de ventas se pondra en contacto viabwats app para confirmar ti envio </div>}
             </div>
           )}
         </div>
