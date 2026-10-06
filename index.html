@@ -12,6 +12,13 @@
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Jost',sans-serif;background:#faf7f2;color:#2e2416}
 @keyframes spin{to{transform:rotate(360deg)}}
+@media print{
+  body *{visibility:hidden!important}
+  #ticket,#ticket *{visibility:visible!important}
+  #ticket{position:absolute!important;left:0;top:0;width:100%!important;max-width:380px;box-shadow:none!important;border-radius:0!important}
+  .ticket-overlay{position:absolute!important;overflow:visible!important;background:none!important;inset:auto!important}
+  .no-print{display:none!important}
+}
 </style>
 </head>
 <body>
@@ -28,6 +35,7 @@ const hdrs=()=>({"apikey":SB_KEY,"Authorization":"Bearer "+SB_KEY,"Content-Type"
 const db=async(table,params="")=>{const r=await fetch(SB_URL+"/rest/v1/"+table+params,{headers:hdrs()});return r.json();};
 const dbw=async(table,method,data,params="")=>{const r=await fetch(SB_URL+"/rest/v1/"+table+params,{method,headers:{...hdrs(),"Prefer":"return=representation"},body:JSON.stringify(data)});return r.json();};
 const dbdel=async(table,params)=>fetch(SB_URL+"/rest/v1/"+table+params,{method:"DELETE",headers:hdrs()});
+const dbup=async(table,data,conflict)=>{const r=await fetch(SB_URL+"/rest/v1/"+table+"?on_conflict="+conflict,{method:"POST",headers:{...hdrs(),"Prefer":"resolution=merge-duplicates,return=representation"},body:JSON.stringify(data)});return r.json();};
 
 /* ── PIN ── */
 const getPin=()=>localStorage.getItem("aether_pin")||"1234";
@@ -61,6 +69,16 @@ addRango("Ecatepec",55000,55550);
 // Ixtapaluca
 addLista("Ixtapaluca",["56530","56535","56536","56537","56540","56545","56550","56553","56555","56560","56565","56566","56567","56568","56569","56570","56573","56574","56575","56576","56577","56578","56579","56580","56583","56585","56586","56587","56588","56589","56590","56593","56594","56595","56596","56597","56598","56599"]);
 
+// Base + cambios hechos desde Admin (tabla zonas_cp: cp, zona, activo)
+const mapaCP=(rows)=>{
+  const m={...CP_ZONA};
+  (Array.isArray(rows)?rows:[]).forEach(r=>{
+    if(!r||!r.cp)return;
+    if(r.activo===false)delete m[r.cp];else m[r.cp]=r.zona;
+  });
+  return m;
+};
+
 /* ── DATOS ── */
 const CATS=["Veladoras","Incienso","Protecciones","Hierbas en té","Hierbas para baño","Sales","Esencias y concentrados","Alcoholes","Accesorios","Cuarzos"];
 const ST_LABELS={nuevo:"🆕 Nuevo",confirmado:"✅ Confirmado",enviado:"🚚 Enviado",entregado:"🏠 Entregado",cancelado:"❌ Cancelado"};
@@ -80,6 +98,63 @@ const B=(bg="#1a1510",extra={})=>({width:"100%",padding:13,background:bg,color:"
 const Toast=({msg})=><div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:"#1a1510",color:"#faf7f2",padding:"10px 22px",borderRadius:50,fontSize:13,zIndex:9999,pointerEvents:"none",whiteSpace:"nowrap",boxShadow:"0 8px 30px rgba(0,0,0,0.3)"}}>{msg}</div>;
 const Spin=()=><div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:60}}><div style={{width:32,height:32,border:"3px solid #e0d8cc",borderTop:"3px solid #c8902a",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/></div>;
 
+/* ── TICKET ── */
+const money=n=>"$"+Number(n||0).toLocaleString("es-MX",{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtFecha=d=>new Date(d).toLocaleString("es-MX",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
+const waMsg=(t,cfg)=>{
+  const lista=t.items.map(p=>"• "+p.nombre+(p.cantidad>1?" x"+p.cantidad:"")+" — "+money(p.precio*p.cantidad)).join("\n");
+  const envio=t.envio==="cobertura"?"🚚 Envío sin costo":"📦 Envío por paquetería";
+  const banco=cfg.clabe?"\n\n💳 Datos de pago:\n"+(cfg.banco||"")+" — CLABE: "+cfg.clabe+"\nTitular: "+(cfg.titular||""):"";
+  return "🌙 *NUEVO PEDIDO — Folio "+t.folio+"*\n\n"+lista+"\n\n💰 Total: "+money(t.total)+"\n"+envio+"\n\n📍 Dirección:\n"+t.dir+"\n\n👤 "+t.nombre+" · 📞 "+t.telefono+banco;
+};
+function Ticket({t,cfg,onClose,waUrl,waLabel}){
+  const sep={borderTop:"1px dashed #b9ad98",margin:"12px 0"};
+  const row={display:"flex",justifyContent:"space-between",gap:12,fontSize:13,padding:"3px 0"};
+  return(
+    <div className="ticket-overlay" style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:700,overflowY:"auto",padding:"20px 12px 40px",display:"flex",flexDirection:"column",alignItems:"center",gap:14}}>
+      <div id="ticket" style={{background:"white",width:"min(100%,360px)",borderRadius:6,padding:"22px 20px",boxShadow:"0 10px 40px rgba(0,0,0,0.35)",color:"#1a1510",fontFamily:"'Jost',sans-serif"}}>
+        <div style={{textAlign:"center"}}>
+          <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:26,fontWeight:600}}>☽ Aether</div>
+          <div style={{fontSize:11,letterSpacing:"0.12em",color:"#7a6e60"}}>RITUALES QUE DESPIERTAN</div>
+        </div>
+        <div style={sep}/>
+        <div style={row}><span style={{color:"#7a6e60"}}>Folio</span><b>{t.folio}</b></div>
+        <div style={row}><span style={{color:"#7a6e60"}}>Fecha</span><span>{fmtFecha(t.fecha)}</span></div>
+        <div style={row}><span style={{color:"#7a6e60"}}>Cliente</span><span style={{textAlign:"right"}}>{t.nombre}</span></div>
+        <div style={row}><span style={{color:"#7a6e60"}}>Teléfono</span><span>{t.telefono}</span></div>
+        <div style={{...row,display:"block",paddingTop:6}}><span style={{color:"#7a6e60"}}>Entrega: </span><span>{t.dir}</span></div>
+        <div style={sep}/>
+        {t.items.map((it,i)=>(
+          <div key={i} style={row}>
+            <span>{it.nombre}{it.cantidad>1?" ×"+it.cantidad:""}</span>
+            <span style={{whiteSpace:"nowrap"}}>{money(it.precio*it.cantidad)}</span>
+          </div>
+        ))}
+        <div style={sep}/>
+        <div style={row}><span style={{color:"#7a6e60"}}>Envío</span><span>{t.envio==="cobertura"?"Sin costo":"Paquetería (a confirmar)"}</span></div>
+        <div style={{...row,fontSize:17,fontWeight:600,marginTop:4}}><span>TOTAL</span><span style={{color:"#c8902a"}}>{money(t.total)}</span></div>
+        <div style={sep}/>
+        <div style={{fontSize:12,textAlign:"center",color:"#c8902a",fontWeight:600,marginBottom:6}}>PAGO PENDIENTE</div>
+        {cfg&&cfg.clabe?(
+          <div style={{fontSize:12,lineHeight:1.7,textAlign:"center"}}>
+            {cfg.banco&&<div>{cfg.banco}</div>}
+            <div>CLABE: <b>{cfg.clabe}</b></div>
+            {cfg.titular&&<div>Titular: {cfg.titular}</div>}
+            <div>Concepto: {cfg.concepto||t.folio}</div>
+          </div>
+        ):<div style={{fontSize:12,textAlign:"center",color:"#7a6e60"}}>Te enviaremos los datos de pago por WhatsApp.</div>}
+        <div style={sep}/>
+        <div style={{fontSize:11,textAlign:"center",color:"#7a6e60",lineHeight:1.6}}>Envía tu comprobante de pago por WhatsApp.<br/>¡Gracias por tu compra! ☽</div>
+      </div>
+      <div className="no-print" style={{width:"min(100%,360px)",display:"flex",flexDirection:"column",gap:10}}>
+        {waUrl&&<a href={waUrl} target="_blank" rel="noopener noreferrer" style={{...B("#25D366"),display:"block",textAlign:"center",textDecoration:"none"}}>{waLabel||"Enviar por WhatsApp 📲"}</a>}
+        <button onClick={()=>window.print()} style={B("#c8902a")}>🖨 Imprimir / Guardar PDF</button>
+        <button onClick={onClose} style={B("transparent",{border:"1.5px solid rgba(255,255,255,0.6)"})}>Cerrar</button>
+      </div>
+    </div>
+  );
+}
+
 /* ══════════════════════════════════════════════
    TIENDA
 ══════════════════════════════════════════════ */
@@ -92,6 +167,8 @@ function Tienda({onAdmin}){
   const [drawer,setDrawer]=useState(false);
   const [addr,setAddr]=useState({nombre:"",telefono:"",calle:"",colonia:"",cp:"",alcaldia:"",refs:""});
   const [cpSt,setCpSt]=useState(null);
+  const [zmap,setZmap]=useState(CP_ZONA);
+  const [ticket,setTicket]=useState(null);
   const [toast,setToast]=useState("");
   const [loading,setLoading]=useState(true);
   const [enviando,setEnviando]=useState(false);
@@ -103,10 +180,12 @@ function Tienda({onAdmin}){
   useEffect(()=>{
     (async()=>{
       try{
-        const [p,c]=await Promise.all([
+        const [p,c,z]=await Promise.all([
           db("productos","?select=*&activo=eq.true&order=id.asc"),
           db("config","?select=clave,valor"),
+          db("zonas_cp","?select=*").catch(()=>[]),
         ]);
+        setZmap(mapaCP(z));
         setProds(Array.isArray(p)?p:[]);
         if(Array.isArray(c)){const m={};c.forEach(r=>m[r.clave]=r.valor);setCfg(m);}
       }catch(e){}
@@ -121,8 +200,8 @@ function Tienda({onAdmin}){
   const add=p=>{if(!inCart(p.id)){setCarrito(pr=>[...pr,p]);toast2("✦ "+p.nombre+" añadido");}};
   const rm=id=>setCarrito(pr=>pr.filter(c=>c.id!==id));
   const verCP=cp=>{
-    setAddr(a=>({...a,cp,alcaldia:CP_ZONA[cp]||""}));
-    if(cp.length===5)setCpSt(CP_ZONA[cp]?"in":"out");
+    setAddr(a=>({...a,cp,alcaldia:zmap[cp]||""}));
+    if(cp.length===5)setCpSt(zmap[cp]?"in":"out");
     else setCpSt(null);
   };
 
@@ -135,12 +214,8 @@ function Tienda({onAdmin}){
       const ped=await dbw("pedidos","POST",{folio:f,cliente_nombre:addr.nombre,cliente_telefono:addr.telefono,cliente_calle:addr.calle,cliente_colonia:addr.colonia,cliente_cp:addr.cp,cliente_alcaldia:addr.alcaldia,cliente_referencias:addr.refs,total,tipo_envio:cpSt==="in"?"cobertura":"paqueteria",status:"nuevo"});
       const pid=Array.isArray(ped)?ped[0]?.id:ped?.id;
       if(pid)await dbw("pedido_items","POST",carrito.map(p=>({pedido_id:pid,producto_id:p.id,nombre:p.nombre,precio:p.precio,cantidad:1})));
-      const lista=carrito.map(p=>"• "+p.nombre+" — $"+p.precio).join("\n");
-      const envio=cpSt==="in"?"🚚 Envío sin costo":"📦 Envío por paquetería";
-      const dir=addr.calle+", Col. "+addr.colonia+", CP "+addr.cp+(addr.alcaldia?", "+addr.alcaldia:"")+(addr.refs?"\nRefs: "+addr.refs:"");
-      const banco=cfg.clabe?"\n\n💳 Datos de pago:\n"+(cfg.banco||"BBVA")+" — CLABE: "+cfg.clabe+"\nTitular: "+cfg.titular:"";
-      const msg=encodeURIComponent("🌙 *NUEVO PEDIDO — Folio "+f+"*\n\n"+lista+"\n\n💰 Total: $"+total+"\n"+envio+"\n\n📍 Dirección:\n"+dir+"\n\n👤 "+addr.nombre+" · 📞 "+addr.telefono+banco);
-      window.open("https://wa.me/"+(cfg.whatsapp||"525648229075")+"?text="+msg,"_blank");
+      const dir=addr.calle+", Col. "+addr.colonia+", CP "+addr.cp+(addr.alcaldia?", "+addr.alcaldia:"")+(addr.refs?" ("+addr.refs+")":"");
+      setTicket({folio:f,fecha:new Date().toISOString(),nombre:addr.nombre,telefono:addr.telefono,dir,items:carrito.map(p=>({nombre:p.nombre,precio:p.precio,cantidad:1})),total,envio:cpSt==="in"?"cobertura":"paqueteria"});
       setCarrito([]);setAddr({nombre:"",telefono:"",calle:"",colonia:"",cp:"",alcaldia:"",refs:""});setCpSt(null);setDrawer(false);
       toast2("✅ Pedido "+f+" creado");
     }catch(e){toast2("Error al crear pedido");}
@@ -278,6 +353,7 @@ function Tienda({onAdmin}){
         </div>
       )}
 
+      {ticket&&<Ticket t={ticket} cfg={cfg} onClose={()=>setTicket(null)} waLabel="Enviar pedido por WhatsApp 📲" waUrl={"https://wa.me/"+(cfg.whatsapp||"525648229075")+"?text="+encodeURIComponent(waMsg(ticket,cfg))}/>}
       <button onClick={onAdmin} style={{position:"fixed",bottom:20,left:20,width:32,height:32,background:"rgba(0,0,0,0.1)",border:"none",borderRadius:"50%",cursor:"pointer",fontSize:13,color:"rgba(0,0,0,0.2)",zIndex:50}}>⚙</button>
       {toast&&<Toast msg={toast}/>}
     </div>
@@ -433,10 +509,10 @@ function Admin({onSalir}){
         )}
 
         {/* CONFIG */}
-        {sec==="config"&&<ConfigForm cfg={cfg} onGuardar={guardarCfg}/>}
+        {sec==="config"&&<><ConfigForm cfg={cfg} onGuardar={guardarCfg}/><ZonasCP/></>}
       </div>
 
-      {detalle&&<DetallePed ped={detalle} onClose={()=>setDetalle(null)} onSt={cambSt}/>}
+      {detalle&&<DetallePed ped={detalle} cfg={Object.fromEntries(cfg.map(c=>[c.clave,c.valor]))} onClose={()=>setDetalle(null)} onSt={cambSt}/>}
       {editP&&<EditorProd prod={editP} onGuardar={guardarP} onClose={()=>setEditP(null)} onElim={elimP}/>}
       {toast&&<Toast msg={toast}/>}
     </div>
@@ -444,8 +520,9 @@ function Admin({onSalir}){
 }
 
 /* ── DETALLE PEDIDO ── */
-function DetallePed({ped,onClose,onSt}){
+function DetallePed({ped,cfg,onClose,onSt}){
   const [items,setItems]=useState([]);
+  const [verTicket,setVerTicket]=useState(false);
   useEffect(()=>{db("pedido_items","?pedido_id=eq."+ped.id+"&select=*").then(r=>setItems(Array.isArray(r)?r:[]));}, [ped.id]);
   const notif=()=>{
     const msgs={confirmado:"✅ Tu pedido ha sido *confirmado*. Te enviamos datos de pago en breve.",enviado:"🚚 Tu pedido está *en camino*. ¡Pronto llegará!",entregado:"🏠 Tu pedido fue *entregado*. ¡Gracias por tu compra en Aether! ☽"};
@@ -480,8 +557,14 @@ function DetallePed({ped,onClose,onSt}){
             ))}
           </div>
         </div>
+        <button onClick={()=>setVerTicket(true)} style={{...B("#c8902a"),marginBottom:10}}>🧾 Ver ticket de venta</button>
         <button onClick={notif} style={{...B("#25D366")}}>Notificar al cliente por WhatsApp 📲</button>
       </div>
+      {verTicket&&(()=>{
+        const t={folio:ped.folio,fecha:ped.created_at,nombre:ped.cliente_nombre,telefono:ped.cliente_telefono,dir:ped.cliente_calle+", Col. "+ped.cliente_colonia+", CP "+ped.cliente_cp+(ped.cliente_alcaldia?", "+ped.cliente_alcaldia:"")+(ped.cliente_referencias?" ("+ped.cliente_referencias+")":""),items:items.map(i=>({nombre:i.nombre,precio:i.precio,cantidad:i.cantidad})),total:ped.total,envio:ped.tipo_envio};
+        const txt="Hola "+ped.cliente_nombre+" 🌙\nGracias por tu compra en Aether ☽\n\nFolio: *"+ped.folio+"*\n"+t.items.map(i=>"• "+i.nombre+(i.cantidad>1?" x"+i.cantidad:"")+" — "+money(i.precio*i.cantidad)).join("\n")+"\n\nTotal: *"+money(ped.total)+"*"+(cfg&&cfg.clabe?"\n\n💳 "+(cfg.banco||"")+" — CLABE: "+cfg.clabe+"\nTitular: "+(cfg.titular||""):"");
+        return <Ticket t={t} cfg={cfg} onClose={()=>setVerTicket(false)} waLabel="Enviar ticket al cliente 📲" waUrl={"https://wa.me/52"+ped.cliente_telefono+"?text="+encodeURIComponent(txt)}/>;
+      })()}
     </div>
   );
 }
@@ -607,6 +690,126 @@ function ConfigForm({cfg,onGuardar}){
         {pm&&<div style={{padding:"8px 12px",borderRadius:10,background:pm.startsWith("✅")?"rgba(34,139,34,0.08)":"rgba(200,50,50,0.08)",fontSize:13,marginBottom:12,color:pm.startsWith("✅")?"#2d7a2d":"#c0392b"}}>{pm}</div>}
         <button onClick={cambiarPin} style={{...B()}}>Cambiar PIN</button>
       </div>
+    </div>
+  );
+}
+
+/* ── ADMIN DE CÓDIGOS POSTALES ── */
+const SQL_ZONAS="create table if not exists zonas_cp (\n  cp text primary key,\n  zona text not null,\n  activo boolean not null default true\n);\nalter table zonas_cp enable row level security;\ncreate policy \"zonas_cp_todo\" on zonas_cp\n  for all using (true) with check (true);";
+function ZonasCP(){
+  const [rows,setRows]=useState([]);
+  const [listo,setListo]=useState(false);
+  const [sinTabla,setSinTabla]=useState(false);
+  const [msg,setMsg]=useState("");
+  const [texto,setTexto]=useState("");
+  const [zona,setZona]=useState("");
+  const [busq,setBusq]=useState("");
+  const [zf,setZf]=useState("");
+  const [verBajas,setVerBajas]=useState(false);
+  const [ocupado,setOcupado]=useState(false);
+
+  useEffect(()=>{
+    db("zonas_cp","?select=*").then(r=>{
+      if(Array.isArray(r))setRows(r);else setSinTabla(true);
+      setListo(true);
+    }).catch(()=>{setSinTabla(true);setListo(true);});
+  },[]);
+
+  const mapa=mapaCP(rows);
+  const conteo={};Object.values(mapa).forEach(z=>{conteo[z]=(conteo[z]||0)+1;});
+  const zonas=Object.keys(conteo).sort();
+  const bajas=rows.filter(r=>r.activo===false);
+  const flash=m=>{setMsg(m);setTimeout(()=>setMsg(""),4000);};
+
+  const guardar=async(lista)=>{
+    const r=await dbup("zonas_cp",lista,"cp");
+    if(!Array.isArray(r)){setSinTabla(true);flash("❌ No se pudo guardar. Crea primero la tabla zonas_cp (instrucciones abajo).");return false;}
+    setRows(pr=>{const m=new Map(pr.map(x=>[x.cp,x]));lista.forEach(x=>m.set(x.cp,x));return [...m.values()];});
+    return true;
+  };
+  const quitarFila=async(cp)=>{await dbdel("zonas_cp","?cp=eq."+cp);setRows(pr=>pr.filter(x=>x.cp!==cp));};
+
+  const alta=async()=>{
+    const z=zona.trim();
+    if(!z){flash("⚠️ Escribe la zona (alcaldía o municipio)");return;}
+    const cps=new Set();let malos=0;
+    texto.split(/[\s,;]+/).filter(Boolean).forEach(tok=>{
+      const m=tok.match(/^(\d{5})-(\d{5})$/);
+      if(m){
+        const a=+m[1],b=+m[2];
+        if(b>=a&&b-a<=1000){for(let n=a;n<=b;n++)cps.add(String(n).padStart(5,"0"));}else malos++;
+      }else if(/^\d{5}$/.test(tok))cps.add(tok);
+      else malos++;
+    });
+    if(!cps.size){flash("⚠️ No encontré códigos postales válidos");return;}
+    setOcupado(true);
+    const ok=await guardar([...cps].map(cp=>({cp,zona:z,activo:true})));
+    setOcupado(false);
+    if(ok){setTexto("");flash("✅ "+cps.size+" CP en "+z+(malos?" · "+malos+" ignorados":""));}
+  };
+
+  const baja=async(cp,z)=>{
+    if(CP_ZONA[cp]){if(await guardar([{cp,zona:z,activo:false}]))flash("CP "+cp+" dado de baja");}
+    else{await quitarFila(cp);flash("CP "+cp+" eliminado");}
+  };
+  const restaurar=async(cp)=>{await quitarFila(cp);flash("CP "+cp+" restaurado");};
+
+  const lista=Object.entries(mapa).filter(([cp,z])=>(!zf||z===zf)&&(!busq||cp.startsWith(busq))).sort((a,b)=>a[0]<b[0]?-1:1);
+  const mostrar=lista.slice(0,60);
+  const cobertura=busq.length===5?(mapa[busq]?"✅ "+busq+" tiene cobertura ("+mapa[busq]+")":"📦 "+busq+" no tiene cobertura (paquetería)"):"";
+
+  return(
+    <div style={{background:"white",borderRadius:16,border:"1px solid #e0d8cc",padding:20,marginTop:16}}>
+      <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.3rem",marginBottom:4}}>📍 Zonas de cobertura</div>
+      <div style={{fontSize:12,color:"#7a6e60",marginBottom:16,lineHeight:1.5}}>Los códigos postales de esta lista tienen envío sin costo. Cualquier otro se envía por paquetería.</div>
+
+      {listo&&sinTabla&&(
+        <div style={{background:"rgba(200,144,42,0.08)",border:"1px solid rgba(200,144,42,0.3)",borderRadius:12,padding:"12px 14px",marginBottom:16,fontSize:12,lineHeight:1.6}}>
+          <b>Falta un paso para poder guardar cambios.</b> En Supabase abre <b>SQL Editor</b>, pega esto y toca <b>Run</b>; luego recarga esta pantalla:
+          <pre style={{background:"#1a1510",color:"#f0e8d4",padding:10,borderRadius:8,margin:"8px 0",overflowX:"auto",fontSize:11}}>{SQL_ZONAS}</pre>
+          <button onClick={()=>{try{navigator.clipboard.writeText(SQL_ZONAS);flash("Copiado");}catch(e){}}} style={{padding:"6px 14px",border:"1.5px solid #c8902a",borderRadius:50,background:"transparent",cursor:"pointer",fontSize:12}}>Copiar SQL</button>
+        </div>
+      )}
+
+      <div style={{fontSize:11,color:"#7a6e60",letterSpacing:"0.06em",marginBottom:8}}>AGREGAR CÓDIGOS POSTALES</div>
+      <input value={zona} onChange={e=>setZona(e.target.value)} list="zonas-lista" placeholder="Zona (ej. Neza, Coyoacán…)" style={{...I(),marginBottom:8}}/>
+      <datalist id="zonas-lista">{zonas.map(z=><option key={z} value={z}/>)}</datalist>
+      <textarea value={texto} onChange={e=>setTexto(e.target.value)} rows={3} placeholder={"Uno o varios CP separados por coma o espacio.\nTambién rangos: 57000-57099"} style={{...I(),resize:"vertical",marginBottom:8}}/>
+      <button onClick={alta} disabled={ocupado} style={{...B("#c8902a"),opacity:ocupado?0.6:1}}>{ocupado?"Guardando…":"Agregar a cobertura"}</button>
+
+      {msg&&<div style={{marginTop:12,padding:"8px 12px",borderRadius:10,background:msg.startsWith("✅")||msg.startsWith("CP")?"rgba(34,139,34,0.08)":"rgba(200,50,50,0.08)",fontSize:13,color:msg.startsWith("✅")||msg.startsWith("CP")?"#2d7a2d":"#c0392b"}}>{msg}</div>}
+
+      <div style={{fontSize:11,color:"#7a6e60",letterSpacing:"0.06em",margin:"22px 0 8px"}}>CONSULTAR / DAR DE BAJA</div>
+      <input value={busq} onChange={e=>setBusq(e.target.value.replace(/\D/g,"").slice(0,5))} placeholder="Buscar por código postal" inputMode="numeric" style={{...I(),marginBottom:8}}/>
+      {cobertura&&<div style={{fontSize:13,marginBottom:8}}>{cobertura}</div>}
+      <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:10}}>
+        <button onClick={()=>setZf("")} style={{padding:"5px 12px",borderRadius:50,border:"1.5px solid "+(!zf?"#c8902a":"#e0d8cc"),background:!zf?"#c8902a":"white",color:!zf?"white":"#2e2416",cursor:"pointer",fontSize:12}}>Todas ({Object.keys(mapa).length})</button>
+        {zonas.map(z=><button key={z} onClick={()=>setZf(zf===z?"":z)} style={{padding:"5px 12px",borderRadius:50,border:"1.5px solid "+(zf===z?"#c8902a":"#e0d8cc"),background:zf===z?"#c8902a":"white",color:zf===z?"white":"#2e2416",cursor:"pointer",fontSize:12}}>{z} ({conteo[z]})</button>)}
+      </div>
+      <div style={{maxHeight:320,overflowY:"auto",border:"1px solid #f0ece6",borderRadius:12}}>
+        {mostrar.length===0&&<div style={{padding:20,textAlign:"center",color:"#7a6e60",fontSize:13}}>Sin resultados</div>}
+        {mostrar.map(([cp,z])=>(
+          <div key={cp} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",borderBottom:"1px solid #f0ece6",fontSize:13}}>
+            <span><b>{cp}</b> <span style={{color:"#7a6e60"}}>· {z}</span></span>
+            <button onClick={()=>baja(cp,z)} style={{padding:"4px 12px",border:"1.5px solid #e0d8cc",borderRadius:50,background:"transparent",color:"#c0392b",cursor:"pointer",fontSize:12}}>Quitar</button>
+          </div>
+        ))}
+      </div>
+      {lista.length>60&&<div style={{fontSize:11,color:"#7a6e60",marginTop:6}}>Mostrando 60 de {lista.length}. Filtra por zona o busca un CP.</div>}
+
+      {bajas.length>0&&(
+        <div style={{marginTop:16}}>
+          <button onClick={()=>setVerBajas(v=>!v)} style={{background:"none",border:"none",cursor:"pointer",fontSize:13,color:"#7a6e60",textDecoration:"underline"}}>{verBajas?"Ocultar":"Ver"} dados de baja ({bajas.length})</button>
+          {verBajas&&<div style={{maxHeight:200,overflowY:"auto",border:"1px solid #f0ece6",borderRadius:12,marginTop:8}}>
+            {bajas.map(r=>(
+              <div key={r.cp} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",borderBottom:"1px solid #f0ece6",fontSize:13}}>
+                <span><b>{r.cp}</b> <span style={{color:"#7a6e60"}}>· {r.zona}</span></span>
+                <button onClick={()=>restaurar(r.cp)} style={{padding:"4px 12px",border:"1.5px solid #2d7a2d",borderRadius:50,background:"transparent",color:"#2d7a2d",cursor:"pointer",fontSize:12}}>Restaurar</button>
+              </div>
+            ))}
+          </div>}
+        </div>
+      )}
     </div>
   );
 }
