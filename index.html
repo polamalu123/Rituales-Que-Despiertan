@@ -15,6 +15,8 @@ body{font-family:'Jost',sans-serif;background:#faf7f2;color:#2e2416}
 .snap{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
 .snap::-webkit-scrollbar{display:none}
 .snap>*{flex:0 0 100%;scroll-snap-align:start;min-width:0}
+@keyframes nudge{0%,100%{transform:translateX(-3px)}50%{transform:translateX(3px)}}
+@media (prefers-reduced-motion:reduce){.nudge{animation:none!important}}
 @media print{
   body *{visibility:hidden!important}
   #ticket,#ticket *{visibility:visible!important}
@@ -142,6 +144,32 @@ const Stepper=({q,onMinus,onPlus,maxed,big})=>{
   );
 };
 
+// ── SKU: 2 consonantes del tipo + 2 consonantes del material + consecutivo ──
+const consonantes=(txt,n=2)=>{
+  const limpio=String(txt||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toUpperCase().replace(/[^A-Z]/g,"");
+  return (limpio.replace(/[AEIOU]/g,"")+"XX").slice(0,n);
+};
+const prefijoSku=(categoria,material)=>consonantes(categoria)+consonantes(material);
+// el consecutivo lo entrega la base de datos y nunca se reutiliza, aunque se elimine un producto
+const siguienteSku=async(prefijo)=>{
+  try{
+    const r=await fetch(SB_URL+"/rest/v1/rpc/siguiente_sku",{method:"POST",headers:hdrs(),body:JSON.stringify({p_prefijo:prefijo})});
+    const j=await r.json();
+    if(r.ok&&typeof j==="string")return j;
+    alert("No se pudo generar el SKU: "+((j&&(j.message||j.hint))||r.status)+"\n\nEjecuta primero en Supabase → SQL Editor el código de SKU que te dio Claude.");
+  }catch(e){alert("Sin conexión al generar el SKU.");}
+  return null;
+};
+
+// icono que indica que se puede deslizar de lado
+const SwipeIcon=()=>(
+  <span title="Desliza para ver más modelos" aria-label="Desliza para ver más modelos" style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:36,height:36,borderRadius:"50%",background:"rgba(200,144,42,0.13)",flexShrink:0}}>
+    <svg className="nudge" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#c8902a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{animation:"nudge 1.6s ease-in-out infinite"}}>
+      <path d="M8 7l-5 5 5 5"/><path d="M16 7l5 5-5 5"/><path d="M3 12h18"/>
+    </svg>
+  </span>
+);
+
 // clave única de una línea del carrito (producto o producto+variante)
 const kOf=p=>p.key||String(p.id);
 
@@ -206,10 +234,11 @@ function VarCard({p,qtyOf,maxed,add,dec}){
   return(
     <div style={{background:"white",borderRadius:20,border:"1px solid #e0d8cc",overflow:"hidden"}}>
       <div style={{padding:"14px 16px 10px"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
           <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.3rem"}}>{p.nombre}</div>
-          <span style={{fontSize:11,color:"#c8902a",whiteSpace:"nowrap"}}>🎨 {i+1} de {vs.length}</span>
+          {vs.length>1&&<SwipeIcon/>}
         </div>
+        {p.sku&&<div style={{fontSize:11,color:"#9a8f80",letterSpacing:"0.05em",marginTop:2}}>SKU {p.sku}</div>}
         {p.descripcion&&<div style={{fontSize:13,color:"#7a6e60",marginTop:4,lineHeight:1.5}}>{p.descripcion}</div>}
       </div>
       <div ref={ref} className="snap" onScroll={onScroll}>
@@ -500,6 +529,7 @@ function Tienda({onAdmin}){
               <div style={{width:"100%",aspectRatio:"4/3",background:p.imagen_url?"url("+p.imagen_url+") center/cover":"#f0ecf5",backgroundSize:"cover",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"3.5rem"}}>{!p.imagen_url&&(p.emoji||"✨")}</div>
               <div style={{padding:"14px 16px 16px"}}>
                 <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.3rem",marginBottom:4}}>{p.nombre}</div>
+                {p.sku&&<div style={{fontSize:11,color:"#9a8f80",letterSpacing:"0.05em",marginBottom:6}}>SKU {p.sku}</div>}
                 <div style={{fontSize:13,color:"#7a6e60",marginBottom:12,lineHeight:1.5}}>{p.descripcion}</div>
                 {p.stock<=3&&p.stock>0&&<div style={{fontSize:11,color:"#c8902a",marginBottom:8}}>⚡ Últimas {p.stock} unidades</div>}
                 {p.stock===0&&<div style={{fontSize:11,color:"#999",marginBottom:8}}>Sin stock</div>}
@@ -649,7 +679,19 @@ function Admin({onSalir}){
     const vs=form.variantes||[];
     if(vs.some(v=>!String(v.nombre||"").trim())){alert("Cada variante necesita un nombre.");return;}
     const incluyeVar=vs.length>0||("variantes" in form);
+    const colsSku=form.id?("sku" in form):true;
+    let sku=form.sku||null;
+    if(colsSku&&!sku){
+      const mat=String(form.material||"").trim();
+      if(!form.id&&!mat){alert("Escribe el material del producto (ej. Parafina) para generar su SKU.");return;}
+      if(mat){
+        const nuevo=await siguienteSku(prefijoSku(form.categoria,mat));
+        if(!nuevo)return;
+        sku=nuevo;
+      }
+    }
     const d={nombre:form.nombre,descripcion:form.descripcion,precio:Number(form.precio),stock:vs.length?vs.reduce((a,v)=>a+(Number(v.stock)||0),0):Number(form.stock),categoria:form.categoria,emoji:form.emoji||"✨",activo:form.activo,imagen_url:form.imagen_url||null};
+    if(colsSku){d.material=String(form.material||"").trim()||null;if(sku)d.sku=sku;}
     if(incluyeVar)d.variantes=vs.map(v=>({id:v.id,nombre:String(v.nombre).trim(),descripcion:v.descripcion||"",precio:(v.precio===""||v.precio===null||v.precio===undefined)?null:Number(v.precio),stock:Number(v.stock)||0,emoji:v.emoji||"",imagen_url:v.imagen_url||null}));
     let r;
     if(form.id)r=await dbw("productos","PATCH",d,"?id=eq."+form.id);
@@ -745,7 +787,8 @@ function Admin({onSalir}){
                 <div style={{width:52,height:52,borderRadius:10,background:p.imagen_url?"url("+p.imagen_url+") center/cover":"#f0ecf5",backgroundSize:"cover",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"1.5rem",flexShrink:0}}>{!p.imagen_url&&p.emoji}</div>
                 <div style={{flex:1}}>
                   <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:15,fontWeight:600}}>{p.nombre}</div>
-                  <div style={{fontSize:12,color:"#7a6e60",display:"flex",gap:8,marginTop:3}}>
+                  <div style={{fontSize:12,color:"#7a6e60",display:"flex",flexWrap:"wrap",gap:8,marginTop:3}}>
+                    {p.sku&&<span style={{fontFamily:"monospace",color:"#5a4e40",background:"#f0ece6",padding:"0 6px",borderRadius:4}}>{p.sku}</span>}
                     <span style={{color:"#c8902a",fontWeight:500}}>${p.precio}</span>
                     <span style={{color:p.stock>3?"#2d7a2d":p.stock>0?"#c8902a":"#999"}}>Stock: {p.stock}</span>
                     {Array.isArray(p.variantes)&&p.variantes.length>0&&<span>🎨 {p.variantes.length} variantes</span>}
@@ -892,6 +935,22 @@ function EditorProd({prod,onGuardar,onClose,onElim}){
             {CATS.map(c=><option key={c}>{c}</option>)}
           </select>
         </div>
+
+        {(!form.id||("sku" in form))&&(
+          <>
+            <div style={{marginBottom:12}}>
+              <label style={{fontSize:12,color:"#7a6e60",display:"block",marginBottom:4}}>Material (se usa para el SKU)</label>
+              <input value={form.material||""} onChange={e=>s("material",e.target.value)} placeholder="Ej. Parafina, Cera de abeja, Cuarzo" style={{...I()}}/>
+            </div>
+            <div style={{marginBottom:14,padding:"10px 12px",borderRadius:10,background:"#f0ece6",fontSize:12,lineHeight:1.6,color:"#5a4e40"}}>
+              {form.sku
+                ?<>SKU asignado: <b style={{fontFamily:"monospace",fontSize:14}}>{form.sku}</b><br/>No cambia aunque edites el producto.</>
+                :String(form.material||"").trim()
+                  ?<>Se asignará al guardar: <b style={{fontFamily:"monospace",fontSize:14}}>{prefijoSku(form.categoria,form.material)}##</b></>
+                  :<>Escribe el material para generar el SKU{form.id?" (opcional en productos que ya existían)":""}.</>}
+            </div>
+          </>
+        )}
 
         <div style={{background:"white",border:"1px solid #e0d8cc",borderRadius:14,padding:"14px 14px 12px",marginBottom:16}}>
           <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.15rem",fontWeight:600,marginBottom:2}}>🎨 Variantes (opcional)</div>
