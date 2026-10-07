@@ -148,7 +148,28 @@ const waMsg=(t,cfg)=>{
   const banco=cfg.clabe?"\n\n💳 Datos de pago:\n"+(cfg.banco||"")+" — CLABE: "+cfg.clabe+"\nTitular: "+(cfg.titular||""):"";
   return "🌙 *NUEVO PEDIDO — Folio "+t.folio+"*\n\n"+lista+"\n\n💰 Total: "+money(t.total)+"\n"+envio+"\n\n📍 Dirección:\n"+t.dir+"\n\n👤 "+t.nombre+" · 📞 "+t.telefono+banco;
 };
+const copiar=async(txt)=>{
+  try{await navigator.clipboard.writeText(txt);return true;}
+  catch(e){
+    try{const ta=document.createElement("textarea");ta.value=txt;ta.style.position="fixed";ta.style.opacity="0";document.body.appendChild(ta);ta.select();const ok=document.execCommand("copy");document.body.removeChild(ta);return ok;}
+    catch(e2){return false;}
+  }
+};
 function Ticket({t,cfg,onClose,waUrl,waLabel,nota}){
+  const [okKey,setOkKey]=useState("");
+  const cp=async(k,v)=>{if(await copiar(v)){setOkKey(k);setTimeout(()=>setOkKey(""),1600);}};
+  const monto=Number(t.total||0).toFixed(2);
+  const concepto=(cfg&&cfg.concepto)||t.folio;
+  const filaPago=(k,label,val,copyVal)=>(
+    <div key={k} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"5px 0",fontSize:12}}>
+      <div style={{minWidth:0,textAlign:"left"}}>
+        <div style={{color:"#7a6e60",fontSize:10,letterSpacing:"0.06em"}}>{label}</div>
+        <div style={{fontWeight:600,wordBreak:"break-all"}}>{val}</div>
+      </div>
+      <button className="no-print" onClick={()=>cp(k,copyVal)} style={{flexShrink:0,padding:"5px 12px",border:"1.5px solid "+(okKey===k?"#2d7a2d":"#c8902a"),borderRadius:50,background:okKey===k?"rgba(34,139,34,0.08)":"transparent",color:okKey===k?"#2d7a2d":"#c8902a",cursor:"pointer",fontSize:11,fontWeight:500}}>{okKey===k?"✓ Copiado":"Copiar"}</button>
+    </div>
+  );
+  const todo=cfg&&cfg.clabe?[(cfg.banco?"Banco: "+cfg.banco:""),"CLABE: "+cfg.clabe,(cfg.titular?"Titular: "+cfg.titular:""),"Monto: $"+monto,"Concepto: "+concepto].filter(Boolean).join("\n"):"";
   const sep={borderTop:"1px dashed #b9ad98",margin:"12px 0"};
   const row={display:"flex",justifyContent:"space-between",gap:12,fontSize:13,padding:"3px 0"};
   return(
@@ -177,11 +198,13 @@ function Ticket({t,cfg,onClose,waUrl,waLabel,nota}){
         <div style={sep}/>
         <div style={{fontSize:12,textAlign:"center",color:"#c8902a",fontWeight:600,marginBottom:6}}>PAGO PENDIENTE</div>
         {cfg&&cfg.clabe?(
-          <div style={{fontSize:12,lineHeight:1.7,textAlign:"center"}}>
-            {cfg.banco&&<div>{cfg.banco}</div>}
-            <div>CLABE: <b>{cfg.clabe}</b></div>
-            {cfg.titular&&<div>Titular: {cfg.titular}</div>}
-            <div>Concepto: {cfg.concepto||t.folio}</div>
+          <div>
+            {cfg.banco&&filaPago("banco","BANCO",cfg.banco,cfg.banco)}
+            {filaPago("clabe","CLABE",cfg.clabe,cfg.clabe)}
+            {cfg.titular&&filaPago("titular","TITULAR",cfg.titular,cfg.titular)}
+            {filaPago("monto","MONTO A TRANSFERIR",money(t.total),monto)}
+            {filaPago("concepto","CONCEPTO",concepto,concepto)}
+            <button className="no-print" onClick={()=>cp("todo",todo)} style={{width:"100%",marginTop:8,padding:"8px 0",border:"none",borderRadius:50,background:okKey==="todo"?"#2d7a2d":"#1a1510",color:"white",cursor:"pointer",fontSize:12,fontWeight:500}}>{okKey==="todo"?"✓ Datos copiados":"Copiar todos los datos de pago"}</button>
           </div>
         ):<div style={{fontSize:12,textAlign:"center",color:"#7a6e60"}}>Te enviaremos los datos de pago por WhatsApp.</div>}
         <div style={sep}/>
