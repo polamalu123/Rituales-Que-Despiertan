@@ -37,6 +37,36 @@ const dbw=async(table,method,data,params="")=>{const r=await fetch(SB_URL+"/rest
 const dbdel=async(table,params)=>fetch(SB_URL+"/rest/v1/"+table+params,{method:"DELETE",headers:hdrs()});
 const dbup=async(table,data,conflict)=>{const r=await fetch(SB_URL+"/rest/v1/"+table+"?on_conflict="+conflict,{method:"POST",headers:{...hdrs(),"Prefer":"resolution=merge-duplicates,return=representation"},body:JSON.stringify(data)});return r.json();};
 
+/* ── CUENTAS DE CLIENTE (Supabase Auth) ── */
+const SESS_KEY="aether_session";
+const loadSess=()=>{try{return JSON.parse(localStorage.getItem(SESS_KEY)||"null");}catch(e){return null;}};
+const saveSess=v=>{try{if(v)localStorage.setItem(SESS_KEY,JSON.stringify(v));else localStorage.removeItem(SESS_KEY);}catch(e){}};
+const authFetch=async(path,body,method="POST",token)=>{
+  const r=await fetch(SB_URL+"/auth/v1/"+path,{method,headers:{"apikey":SB_KEY,"Content-Type":"application/json",...(token?{"Authorization":"Bearer "+token}:{})},body:body?JSON.stringify(body):undefined});
+  const data=await r.json().catch(()=>({}));
+  return {ok:r.ok,status:r.status,data};
+};
+const normSess=d=>({access_token:d.access_token,refresh_token:d.refresh_token,expires_at:d.expires_at||Math.floor(Date.now()/1000)+(d.expires_in||3600),user:d.user});
+const refreshSess=async(sv)=>{
+  try{
+    const r=await authFetch("token?grant_type=refresh_token",{refresh_token:sv.refresh_token});
+    if(r.ok&&r.data.access_token){const n=normSess(r.data);saveSess(n);return n;}
+    if(r.status>=400&&r.status<500){saveSess(null);return null;}
+  }catch(e){}
+  return sv;
+};
+const validSess=async()=>{
+  let sv=loadSess();
+  if(!sv)return null;
+  if(sv.expires_at-60<Date.now()/1000)sv=await refreshSess(sv);
+  return sv;
+};
+// peticiones a la base de datos con el token del cliente
+const udb=async(token,table,method,data,params="")=>{
+  const r=await fetch(SB_URL+"/rest/v1/"+table+params,{method,headers:{"apikey":SB_KEY,"Authorization":"Bearer "+token,"Content-Type":"application/json","Prefer":"return=representation"},body:data?JSON.stringify(data):undefined});
+  return r.json();
+};
+
 /* ── PIN ── */
 const getPin=()=>localStorage.getItem("aether_pin")||"1234";
 
@@ -118,7 +148,7 @@ const waMsg=(t,cfg)=>{
   const banco=cfg.clabe?"\n\n💳 Datos de pago:\n"+(cfg.banco||"")+" — CLABE: "+cfg.clabe+"\nTitular: "+(cfg.titular||""):"";
   return "🌙 *NUEVO PEDIDO — Folio "+t.folio+"*\n\n"+lista+"\n\n💰 Total: "+money(t.total)+"\n"+envio+"\n\n📍 Dirección:\n"+t.dir+"\n\n👤 "+t.nombre+" · 📞 "+t.telefono+banco;
 };
-function Ticket({t,cfg,onClose,waUrl,waLabel}){
+function Ticket({t,cfg,onClose,waUrl,waLabel,nota}){
   const sep={borderTop:"1px dashed #b9ad98",margin:"12px 0"};
   const row={display:"flex",justifyContent:"space-between",gap:12,fontSize:13,padding:"3px 0"};
   return(
@@ -158,6 +188,7 @@ function Ticket({t,cfg,onClose,waUrl,waLabel}){
         <div style={{fontSize:11,textAlign:"center",color:"#7a6e60",lineHeight:1.6}}>Envía tu comprobante de pago por WhatsApp.<br/>¡Gracias por tu compra! ☽</div>
       </div>
       <div className="no-print" style={{width:"min(100%,360px)",display:"flex",flexDirection:"column",gap:10}}>
+        {nota&&<div style={{color:"rgba(255,255,255,0.9)",fontSize:12,textAlign:"center",lineHeight:1.5}}>{nota}</div>}
         {waUrl&&<a href={waUrl} target="_blank" rel="noopener noreferrer" style={{...B("#25D366"),display:"block",textAlign:"center",textDecoration:"none"}}>{waLabel||"Enviar por WhatsApp 📲"}</a>}
         <button onClick={()=>window.print()} style={B("#c8902a")}>🖨 Imprimir / Guardar PDF</button>
         <button onClick={onClose} style={B("transparent",{border:"1.5px solid rgba(255,255,255,0.6)"})}>Cerrar</button>
@@ -180,6 +211,10 @@ function Tienda({onAdmin}){
   const [cpSt,setCpSt]=useState(null);
   const [zmap,setZmap]=useState(CP_ZONA);
   const [ticket,setTicket]=useState(null);
+  const [sess,setSess]=useState(null);
+  const [authOpen,setAuthOpen]=useState(false);
+  const [misOpen,setMisOpen]=useState(false);
+  const [recov,setRecov]=useState(null);
   const [toast,setToast]=useState("");
   const [loading,setLoading]=useState(true);
   const [enviando,setEnviando]=useState(false);
@@ -203,6 +238,42 @@ function Tienda({onAdmin}){
       setLoading(false);
     })();
   },[]);
+
+  useEffect(()=>{
+    (async()=>{
+      try{
+        const h=window.location.hash||"";
+        if(h.includes("error_description")){
+          history.replaceState(null,"",window.location.pathname+window.location.search);
+          toast2("⚠️ El enlace del correo expiró. Solicita otro.");
+        }else if(h.includes("access_token")){
+          const q=new URLSearchParams(h.replace(/^#/,""));
+          const at=q.get("access_token"),rt=q.get("refresh_token"),type=q.get("type");
+          history.replaceState(null,"",window.location.pathname+window.location.search);
+          const u=await authFetch("user",null,"GET",at);
+          if(u.ok){
+            const n={access_token:at,refresh_token:rt,expires_at:Math.floor(Date.now()/1000)+(Number(q.get("expires_in"))||3600),user:u.data};
+            if(type==="recovery"){setRecov(n);return;}
+            saveSess(n);setSess(n);toast2("✅ Cuenta confirmada, ¡bienvenida!");return;
+          }
+        }
+        const sv=await validSess();
+        if(sv)setSess(sv);
+      }catch(e){}
+    })();
+  },[]);
+
+  useEffect(()=>{
+    if(!sess)return;
+    const m=(sess.user&&sess.user.user_metadata)||{};
+    setAddr(a=>({...a,nombre:a.nombre||m.nombre||"",telefono:a.telefono||m.telefono||""}));
+  },[sess]);
+
+  const cerrarSesion=async()=>{
+    const sv=loadSess();
+    if(sv)authFetch("logout",null,"POST",sv.access_token).catch(()=>{});
+    saveSess(null);setSess(null);setMisOpen(false);toast2("Sesión cerrada");
+  };
 
   const cats=["Todos",...CATS.filter(c=>prods.some(p=>p.categoria===c))];
   const vis=prods.filter(p=>(filtro==="Todos"||p.categoria===filtro)&&(!busq||p.nombre.toLowerCase().includes(busq.toLowerCase())));
@@ -229,13 +300,25 @@ function Tienda({onAdmin}){
     setEnviando(true);
     try{
       const f=folio();
-      const ped=await dbw("pedidos","POST",{folio:f,cliente_nombre:addr.nombre,cliente_telefono:addr.telefono,cliente_calle:addr.calle,cliente_colonia:addr.colonia,cliente_cp:addr.cp,cliente_alcaldia:addr.alcaldia,cliente_referencias:addr.refs,total,tipo_envio:cpSt==="in"?"cobertura":"paqueteria",status:"nuevo"});
-      const pid=Array.isArray(ped)?ped[0]?.id:ped?.id;
-      if(pid)await dbw("pedido_items","POST",carrito.map(p=>({pedido_id:pid,producto_id:p.id,nombre:p.nombre,precio:p.precio,cantidad:p.qty})));
+      const base={folio:f,cliente_nombre:addr.nombre,cliente_telefono:addr.telefono,cliente_calle:addr.calle,cliente_colonia:addr.colonia,cliente_cp:addr.cp,cliente_alcaldia:addr.alcaldia,cliente_referencias:addr.refs,total,tipo_envio:cpSt==="in"?"cobertura":"paqueteria",status:"nuevo"};
+      let tk=null;
+      if(sess){tk=await validSess();}
+      let ped=null,conCuenta=false;
+      if(tk){
+        ped=await udb(tk.access_token,"pedidos","POST",{...base,user_id:tk.user.id});
+        conCuenta=Array.isArray(ped)&&!!(ped[0]&&ped[0].id);
+      }
+      if(!conCuenta)ped=await dbw("pedidos","POST",base);
+      const pid=Array.isArray(ped)?(ped[0]&&ped[0].id):(ped&&ped.id);
+      if(pid){
+        const filas=carrito.map(p=>({pedido_id:pid,producto_id:p.id,nombre:p.nombre,precio:p.precio,cantidad:p.qty}));
+        if(conCuenta)await udb(tk.access_token,"pedido_items","POST",filas);
+        else await dbw("pedido_items","POST",filas);
+      }
       const dir=addr.calle+", Col. "+addr.colonia+", CP "+addr.cp+(addr.alcaldia?", "+addr.alcaldia:"")+(addr.refs?" ("+addr.refs+")":"");
       setTicket({folio:f,fecha:new Date().toISOString(),nombre:addr.nombre,telefono:addr.telefono,dir,items:carrito.map(p=>({nombre:p.nombre,precio:p.precio,cantidad:p.qty})),total,envio:cpSt==="in"?"cobertura":"paqueteria"});
       setCarrito([]);setAddr({nombre:"",telefono:"",calle:"",colonia:"",cp:"",alcaldia:"",refs:""});setCpSt(null);setDrawer(false);
-      toast2("✅ Pedido "+f+" creado");
+      toast2(tk&&!conCuenta?"⚠️ Pedido creado, pero no quedó ligado a tu cuenta":"✅ Pedido "+f+" creado");
     }catch(e){toast2("Error al crear pedido");}
     setEnviando(false);
   };
@@ -247,10 +330,13 @@ function Tienda({onAdmin}){
       {/* NAV */}
       <nav style={{position:"sticky",top:0,zIndex:100,background:"rgba(250,247,242,0.95)",backdropFilter:"blur(12px)",borderBottom:"1px solid #e0d8cc",padding:"0 20px",height:60,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
         <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:22,fontWeight:600}}><span style={{color:"#c8902a"}}>☽</span> Aether<span style={{color:"#c8902a"}}>.</span></div>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+        <button onClick={()=>sess?setMisOpen(true):setAuthOpen(true)} style={{padding:"7px 13px",border:"1.5px solid #1a1510",borderRadius:50,background:sess?"#1a1510":"transparent",color:sess?"#faf7f2":"#1a1510",cursor:"pointer",fontSize:13,whiteSpace:"nowrap"}}>{sess?"📦 Mis pedidos":"👤 Entrar"}</button>
         <button onClick={()=>setDrawer(true)} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 16px",border:"1.5px solid #1a1510",borderRadius:50,background:"transparent",cursor:"pointer",fontSize:13,position:"relative"}}>
           🛍 Carrito
           {piezas>0&&<span style={{position:"absolute",top:-6,right:-6,minWidth:18,height:18,padding:"0 4px",background:"#c8902a",color:"white",borderRadius:9,fontSize:10,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700}}>{piezas}</span>}
         </button>
+        </div>
       </nav>
 
       {/* HERO */}
@@ -372,7 +458,10 @@ function Tienda({onAdmin}){
         </div>
       )}
 
-      {ticket&&<Ticket t={ticket} cfg={cfg} onClose={()=>setTicket(null)} waLabel="Enviar pedido por WhatsApp 📲" waUrl={"https://wa.me/"+(cfg.whatsapp||"525648229075")+"?text="+encodeURIComponent(waMsg(ticket,cfg))}/>}
+      {authOpen&&<AuthModal onClose={()=>setAuthOpen(false)} onSession={n=>{setSess(n);setAuthOpen(false);toast2("✅ Sesión iniciada");}}/>}
+      {misOpen&&sess&&<MisPedidos sess={sess} cfg={cfg} onClose={()=>setMisOpen(false)} onLogout={cerrarSesion}/>}
+      {recov&&<RecoverModal sess={recov} onClose={()=>setRecov(null)} onDone={n=>{setSess(n);setRecov(null);toast2("✅ Contraseña actualizada");}}/>}
+      {ticket&&<Ticket nota={sess?"Sigue el status de tu pedido en 📦 Mis pedidos.":"Crea tu cuenta (👤 Entrar) para seguir el status de tus próximos pedidos."} t={ticket} cfg={cfg} onClose={()=>setTicket(null)} waLabel="Enviar pedido por WhatsApp 📲" waUrl={"https://wa.me/"+(cfg.whatsapp||"525648229075")+"?text="+encodeURIComponent(waMsg(ticket,cfg))}/>}
       <button onClick={onAdmin} style={{position:"fixed",bottom:20,left:20,width:32,height:32,background:"rgba(0,0,0,0.1)",border:"none",borderRadius:"50%",cursor:"pointer",fontSize:13,color:"rgba(0,0,0,0.2)",zIndex:50}}>⚙</button>
       {toast&&<Toast msg={toast}/>}
     </div>
@@ -497,7 +586,7 @@ function Admin({onSalir}){
                     <span style={{fontSize:11,padding:"2px 8px",borderRadius:50,background:ST_COLORS[p.status]+"22",color:ST_COLORS[p.status]}}>{ST_LABELS[p.status]}</span>
                   </div>
                 </div>
-                <div style={{fontSize:12,color:"#7a6e60"}}>{p.tipo_envio==="cobertura"?"🚚 Sin costo":"📦 Paquetería"} · {new Date(p.created_at).toLocaleDateString("es-MX",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</div>
+                <div style={{fontSize:12,color:"#7a6e60"}}>{p.tipo_envio==="cobertura"?"🚚 Sin costo":"📦 Paquetería"} · {new Date(p.created_at).toLocaleDateString("es-MX",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}{p.user_id?" · 👤 con cuenta":""}</div>
               </div>
             ))}
           </>
@@ -709,6 +798,222 @@ function ConfigForm({cfg,onGuardar}){
         {pm&&<div style={{padding:"8px 12px",borderRadius:10,background:pm.startsWith("✅")?"rgba(34,139,34,0.08)":"rgba(200,50,50,0.08)",fontSize:13,marginBottom:12,color:pm.startsWith("✅")?"#2d7a2d":"#c0392b"}}>{pm}</div>}
         <button onClick={cambiarPin} style={{...B()}}>Cambiar PIN</button>
       </div>
+    </div>
+  );
+}
+
+/* ── CUENTAS: ENTRAR / REGISTRARSE ── */
+const errAuth=d=>{
+  const m=(d&&(d.msg||d.error_description||d.message||d.error))||"Ocurrió un error. Intenta de nuevo.";
+  const l=String(m).toLowerCase();
+  if(l.includes("already registered")||l.includes("already been registered"))return "Ese correo ya tiene cuenta. Inicia sesión.";
+  if(l.includes("invalid login"))return "Correo o contraseña incorrectos.";
+  if(l.includes("not confirmed"))return "Primero confirma tu correo: te enviamos un enlace.";
+  if(l.includes("at least"))return "La contraseña debe tener al menos 6 caracteres.";
+  if(l.includes("rate limit")||l.includes("security purposes"))return "Demasiados intentos. Espera unos minutos e inténtalo de nuevo.";
+  if(l.includes("valid email")||l.includes("invalid format")||l.includes("unable to validate email"))return "Escribe un correo válido.";
+  return m;
+};
+const modalBox={position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:600,display:"flex",alignItems:"center",justifyContent:"center",padding:16};
+const cardBox={background:"#faf7f2",borderRadius:20,width:"min(100%,380px)",maxHeight:"92vh",overflowY:"auto",padding:"24px 22px"};
+
+function AuthModal({onClose,onSession}){
+  const [mode,setMode]=useState("login");
+  const [f,setF]=useState({email:"",pass:"",nombre:"",tel:""});
+  const [msg,setMsg]=useState(null);
+  const [busy,setBusy]=useState(false);
+  const set=(k,v)=>setF(pr=>({...pr,[k]:v}));
+  const cambiar=m=>{setMode(m);setMsg(null);};
+  const enviar=async()=>{
+    const email=f.email.trim().toLowerCase();
+    if(!/^\S+@\S+\.\S+$/.test(email)){setMsg({t:"err",m:"Escribe un correo válido."});return;}
+    if(mode!=="forgot"&&f.pass.length<6){setMsg({t:"err",m:"La contraseña debe tener al menos 6 caracteres."});return;}
+    if(mode==="signup"&&!f.nombre.trim()){setMsg({t:"err",m:"Escribe tu nombre."});return;}
+    setBusy(true);setMsg(null);
+    try{
+      if(mode==="forgot"){
+        const r=await authFetch("recover",{email});
+        setMsg(r.ok?{t:"ok",m:"Si ese correo tiene cuenta, te enviamos un enlace para crear una nueva contraseña."}:{t:"err",m:errAuth(r.data)});
+      }else if(mode==="signup"){
+        const r=await authFetch("signup",{email,password:f.pass,data:{nombre:f.nombre.trim(),telefono:f.tel.trim()}});
+        if(!r.ok)setMsg({t:"err",m:errAuth(r.data)});
+        else if(r.data.access_token){const n=normSess(r.data);saveSess(n);onSession(n);}
+        else setMsg({t:"ok",m:"¡Cuenta creada! Revisa tu correo y toca el enlace para confirmarla; después inicia sesión."});
+      }else{
+        const r=await authFetch("token?grant_type=password",{email,password:f.pass});
+        if(r.ok&&r.data.access_token){const n=normSess(r.data);saveSess(n);onSession(n);}
+        else setMsg({t:"err",m:errAuth(r.data)});
+      }
+    }catch(e){setMsg({t:"err",m:"Sin conexión. Inténtalo de nuevo."});}
+    setBusy(false);
+  };
+  const tabBtn=(k,l)=><button onClick={()=>cambiar(k)} style={{flex:1,padding:"9px 0",border:"none",borderBottom:"2px solid "+(mode===k?"#c8902a":"#e0d8cc"),background:"transparent",color:mode===k?"#c8902a":"#7a6e60",cursor:"pointer",fontSize:14,fontWeight:500}}>{l}</button>;
+  return(
+    <div style={modalBox} onClick={onClose}>
+      <div style={cardBox} onClick={e=>e.stopPropagation()}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.5rem",fontWeight:600}}>☽ {mode==="forgot"?"Recuperar acceso":"Tu cuenta"}</div>
+          <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:"#7a6e60"}}>✕</button>
+        </div>
+        {mode!=="forgot"&&<div style={{display:"flex",marginBottom:16}}>{tabBtn("login","Entrar")}{tabBtn("signup","Crear cuenta")}</div>}
+        {mode==="signup"&&<>
+          <input value={f.nombre} onChange={e=>set("nombre",e.target.value)} placeholder="Nombre completo" autoComplete="name" style={{...I(),marginBottom:8}}/>
+          <input value={f.tel} onChange={e=>set("tel",e.target.value.replace(/\D/g,"").slice(0,10))} placeholder="Teléfono (10 dígitos)" inputMode="numeric" autoComplete="tel" style={{...I(),marginBottom:8}}/>
+        </>}
+        <input type="email" value={f.email} onChange={e=>set("email",e.target.value)} placeholder="Correo electrónico" autoComplete="email" style={{...I(),marginBottom:8}}/>
+        {mode!=="forgot"&&<input type="password" value={f.pass} onChange={e=>set("pass",e.target.value)} onKeyDown={e=>e.key==="Enter"&&enviar()} placeholder="Contraseña (mínimo 6 caracteres)" autoComplete={mode==="signup"?"new-password":"current-password"} style={{...I(),marginBottom:8}}/>}
+        {msg&&<div style={{margin:"4px 0 10px",padding:"8px 12px",borderRadius:10,fontSize:13,lineHeight:1.5,background:msg.t==="ok"?"rgba(34,139,34,0.08)":"rgba(200,50,50,0.08)",color:msg.t==="ok"?"#2d7a2d":"#c0392b"}}>{msg.m}</div>}
+        <button onClick={enviar} disabled={busy} style={{...B(),marginTop:6,opacity:busy?0.6:1}}>{busy?"Un momento…":mode==="login"?"Entrar":mode==="signup"?"Crear mi cuenta":"Enviar enlace"}</button>
+        <div style={{textAlign:"center",marginTop:14,fontSize:13}}>
+          {mode==="login"&&<button onClick={()=>cambiar("forgot")} style={{background:"none",border:"none",color:"#7a6e60",textDecoration:"underline",cursor:"pointer",fontSize:13}}>¿Olvidaste tu contraseña?</button>}
+          {mode==="forgot"&&<button onClick={()=>cambiar("login")} style={{background:"none",border:"none",color:"#7a6e60",textDecoration:"underline",cursor:"pointer",fontSize:13}}>Volver a iniciar sesión</button>}
+        </div>
+        {mode==="signup"&&<div style={{fontSize:11,color:"#7a6e60",textAlign:"center",marginTop:12,lineHeight:1.5}}>Con tu cuenta puedes ver el status de tus pedidos cuando los actualicemos.</div>}
+      </div>
+    </div>
+  );
+}
+
+function RecoverModal({sess,onClose,onDone}){
+  const [p1,setP1]=useState("");
+  const [p2,setP2]=useState("");
+  const [msg,setMsg]=useState("");
+  const [busy,setBusy]=useState(false);
+  const guardar=async()=>{
+    if(p1.length<6){setMsg("La contraseña debe tener al menos 6 caracteres.");return;}
+    if(p1!==p2){setMsg("Las contraseñas no coinciden.");return;}
+    setBusy(true);setMsg("");
+    try{
+      const r=await authFetch("user",{password:p1},"PUT",sess.access_token);
+      if(r.ok){saveSess(sess);onDone(sess);}else setMsg(errAuth(r.data));
+    }catch(e){setMsg("Sin conexión. Inténtalo de nuevo.");}
+    setBusy(false);
+  };
+  return(
+    <div style={modalBox}>
+      <div style={cardBox}>
+        <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.5rem",fontWeight:600,marginBottom:14}}>☽ Nueva contraseña</div>
+        <input type="password" value={p1} onChange={e=>setP1(e.target.value)} placeholder="Nueva contraseña" autoComplete="new-password" style={{...I(),marginBottom:8}}/>
+        <input type="password" value={p2} onChange={e=>setP2(e.target.value)} onKeyDown={e=>e.key==="Enter"&&guardar()} placeholder="Repite la contraseña" autoComplete="new-password" style={{...I(),marginBottom:8}}/>
+        {msg&&<div style={{margin:"4px 0 10px",padding:"8px 12px",borderRadius:10,fontSize:13,background:"rgba(200,50,50,0.08)",color:"#c0392b"}}>{msg}</div>}
+        <button onClick={guardar} disabled={busy} style={{...B(),opacity:busy?0.6:1}}>{busy?"Guardando…":"Guardar contraseña"}</button>
+        <button onClick={onClose} style={{display:"block",margin:"12px auto 0",background:"none",border:"none",color:"#7a6e60",textDecoration:"underline",cursor:"pointer",fontSize:13}}>Cancelar</button>
+      </div>
+    </div>
+  );
+}
+
+/* ── MIS PEDIDOS (cliente) ── */
+const FLUJO=[["nuevo","Recibido"],["confirmado","Confirmado"],["enviado","En camino"],["entregado","Entregado"]];
+const MSG_ST={
+  nuevo:"Recibimos tu pedido. Lo revisaremos y te confirmaremos en breve.",
+  confirmado:"Tu pedido está confirmado. Realiza tu pago y envía el comprobante por WhatsApp.",
+  enviado:"¡Tu pedido va en camino!",
+  entregado:"Pedido entregado. ¡Gracias por tu compra!",
+  cancelado:"Este pedido fue cancelado. Escríbenos por WhatsApp si tienes dudas.",
+};
+function Progreso({status}){
+  if(status==="cancelado")return <div style={{padding:"8px 12px",borderRadius:10,background:"rgba(192,57,43,0.08)",color:"#c0392b",fontSize:13}}>❌ Pedido cancelado</div>;
+  const idx=Math.max(0,FLUJO.findIndex(x=>x[0]===status));
+  return(
+    <div style={{display:"flex",alignItems:"flex-start"}}>
+      {FLUJO.map(([k,l],i)=>(
+        <div key={k} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",position:"relative"}}>
+          {i>0&&<div style={{position:"absolute",top:11,right:"50%",width:"100%",height:3,background:i<=idx?"#c8902a":"#e0d8cc"}}/>}
+          <div style={{position:"relative",zIndex:1,width:24,height:24,borderRadius:"50%",background:i<=idx?"#c8902a":"white",border:"2px solid "+(i<=idx?"#c8902a":"#e0d8cc"),color:"white",fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}}>{i<=idx?"✓":""}</div>
+          <div style={{fontSize:11,marginTop:6,textAlign:"center",color:i<=idx?"#2e2416":"#9a8f80",fontWeight:i===idx?600:400}}>{l}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+function MisPedidos({sess,cfg,onClose,onLogout}){
+  const [peds,setPeds]=useState(null);
+  const [error,setError]=useState(false);
+  const [abierto,setAbierto]=useState(null);
+  const [items,setItems]=useState({});
+  const [ticket,setTicket]=useState(null);
+  const [act,setAct]=useState(null);
+  const meta=(sess.user&&sess.user.user_metadata)||{};
+
+  const cargar=async()=>{
+    try{
+      const sv=await validSess();
+      if(!sv){onLogout();return;}
+      const r=await udb(sv.access_token,"pedidos","GET",null,"?select=*&user_id=eq."+sv.user.id+"&order=created_at.desc");
+      if(Array.isArray(r)){setPeds(r);setError(false);setAct(new Date());}else setError(true);
+    }catch(e){setError(true);}
+  };
+  useEffect(()=>{cargar();const iv=setInterval(cargar,30000);return()=>clearInterval(iv);},[]);
+
+  const abrir=async(ped)=>{
+    const nuevo=abierto===ped.id?null:ped.id;
+    setAbierto(nuevo);
+    if(nuevo&&!items[ped.id]){
+      const sv=await validSess();if(!sv)return;
+      const r=await udb(sv.access_token,"pedido_items","GET",null,"?pedido_id=eq."+ped.id+"&select=*");
+      if(Array.isArray(r))setItems(m=>({...m,[ped.id]:r}));
+    }
+  };
+  const verTicket=ped=>setTicket({folio:ped.folio,fecha:ped.created_at,nombre:ped.cliente_nombre,telefono:ped.cliente_telefono,dir:ped.cliente_calle+", Col. "+ped.cliente_colonia+", CP "+ped.cliente_cp+(ped.cliente_alcaldia?", "+ped.cliente_alcaldia:""),items:(items[ped.id]||[]).map(i=>({nombre:i.nombre,precio:i.precio,cantidad:i.cantidad})),total:ped.total,envio:ped.tipo_envio});
+
+  return(
+    <div style={{position:"fixed",inset:0,background:"#faf7f2",zIndex:650,overflowY:"auto"}}>
+      <div style={{maxWidth:480,margin:"0 auto",padding:"0 16px 60px"}}>
+        <div style={{position:"sticky",top:0,background:"rgba(250,247,242,0.96)",backdropFilter:"blur(10px)",padding:"16px 0 12px",borderBottom:"1px solid #e0d8cc",display:"flex",justifyContent:"space-between",alignItems:"center",zIndex:2}}>
+          <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.6rem",fontWeight:600}}>📦 Mis pedidos</div>
+          <button onClick={onClose} style={{width:36,height:36,border:"1.5px solid #e0d8cc",borderRadius:"50%",background:"transparent",cursor:"pointer",fontSize:15,color:"#7a6e60"}}>✕</button>
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",margin:"14px 0 6px",gap:10}}>
+          <div style={{fontSize:13,lineHeight:1.4,minWidth:0}}>
+            <div style={{fontWeight:500}}>{meta.nombre||"Mi cuenta"}</div>
+            <div style={{color:"#7a6e60",overflow:"hidden",textOverflow:"ellipsis"}}>{sess.user&&sess.user.email}</div>
+          </div>
+          <button onClick={onLogout} style={{padding:"6px 14px",border:"1.5px solid #e0d8cc",borderRadius:50,background:"transparent",cursor:"pointer",fontSize:12,whiteSpace:"nowrap"}}>Cerrar sesión</button>
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,fontSize:11,color:"#7a6e60"}}>
+          <span>Se actualiza solo cada 30 s{act?" · "+act.toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"}):""}</span>
+          <button onClick={cargar} style={{padding:"4px 12px",border:"1.5px solid #c8902a",borderRadius:50,background:"transparent",color:"#c8902a",cursor:"pointer",fontSize:12}}>↻ Actualizar</button>
+        </div>
+
+        {peds===null&&!error&&<Spin/>}
+        {error&&<div style={{textAlign:"center",padding:"40px 10px",color:"#7a6e60",fontSize:14}}>No pudimos cargar tus pedidos. Inténtalo de nuevo en unos minutos.</div>}
+        {peds&&peds.length===0&&<div style={{textAlign:"center",padding:"50px 10px",color:"#7a6e60",fontSize:14,lineHeight:1.6}}>🌙 Aún no tienes pedidos con esta cuenta.<br/>Los que hagas con tu sesión iniciada aparecerán aquí.</div>}
+        {peds&&peds.map(ped=>(
+          <div key={ped.id} style={{background:"white",borderRadius:16,border:"1px solid #e0d8cc",padding:"14px 16px",marginBottom:12}}>
+            <div onClick={()=>abrir(ped)} style={{cursor:"pointer"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+                <div>
+                  <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:18,fontWeight:600}}>{ped.folio}</div>
+                  <div style={{fontSize:12,color:"#7a6e60"}}>{fmtFecha(ped.created_at)}</div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontSize:16,fontWeight:600,color:"#c8902a"}}>{money(ped.total)}</div>
+                  <span style={{fontSize:11,padding:"2px 8px",borderRadius:50,background:(ST_COLORS[ped.status]||"#999")+"22",color:ST_COLORS[ped.status]||"#999"}}>{ST_LABELS[ped.status]||ped.status}</span>
+                </div>
+              </div>
+              <Progreso status={ped.status}/>
+              <div style={{fontSize:13,color:"#5a4e40",marginTop:12,lineHeight:1.5}}>{MSG_ST[ped.status]||""}</div>
+              <div style={{fontSize:12,color:"#c8902a",marginTop:8}}>{abierto===ped.id?"Ocultar detalle ▲":"Ver detalle ▼"}</div>
+            </div>
+            {abierto===ped.id&&(
+              <div style={{marginTop:10,borderTop:"1px dashed #e0d8cc",paddingTop:10}}>
+                {!items[ped.id]&&<div style={{fontSize:12,color:"#7a6e60"}}>Cargando…</div>}
+                {(items[ped.id]||[]).map(it=>(
+                  <div key={it.id} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"4px 0"}}>
+                    <span>{it.nombre}{it.cantidad>1?" ×"+it.cantidad:""}</span>
+                    <span style={{color:"#c8902a"}}>{money(it.precio*it.cantidad)}</span>
+                  </div>
+                ))}
+                <div style={{fontSize:12,color:"#7a6e60",marginTop:6}}>📍 {ped.cliente_calle}, Col. {ped.cliente_colonia}, CP {ped.cliente_cp}</div>
+                <div style={{fontSize:12,color:"#7a6e60"}}>{ped.tipo_envio==="cobertura"?"🚚 Envío sin costo":"📦 Paquetería"}</div>
+                {items[ped.id]&&<button onClick={()=>verTicket(ped)} style={{...B("#c8902a"),marginTop:12,padding:10,fontSize:13}}>🧾 Ver ticket</button>}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      {ticket&&<Ticket t={ticket} cfg={cfg} onClose={()=>setTicket(null)}/>}
     </div>
   );
 }
