@@ -16,6 +16,7 @@ body{font-family:'Jost',sans-serif;background:#faf7f2;color:#2e2416}
 .snap::-webkit-scrollbar{display:none}
 .snap>*{flex:0 0 100%;scroll-snap-align:start;min-width:0}
 @keyframes nudge{0%,100%{transform:translateX(-3px)}50%{transform:translateX(3px)}}
+@keyframes manita{0%,100%{transform:translateX(-14px) rotate(-10deg)}50%{transform:translateX(14px) rotate(10deg)}}
 @media (prefers-reduced-motion:reduce){.nudge{animation:none!important}}
 @media print{
   body *{visibility:hidden!important}
@@ -163,10 +164,10 @@ const siguienteSku=async(prefijo)=>{
 
 // icono que indica que se puede deslizar de lado
 const SwipeIcon=()=>(
-  <span title="Desliza para ver más modelos" aria-label="Desliza para ver más modelos" style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:36,height:36,borderRadius:"50%",background:"rgba(200,144,42,0.13)",flexShrink:0}}>
-    <svg className="nudge" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#c8902a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{animation:"nudge 1.6s ease-in-out infinite"}}>
-      <path d="M8 7l-5 5 5 5"/><path d="M16 7l5 5-5 5"/><path d="M3 12h18"/>
-    </svg>
+  <span title="Desliza para ver más modelos" aria-label="Desliza para ver más modelos" style={{display:"inline-flex",alignItems:"center",gap:2,padding:"4px 10px",borderRadius:50,background:"rgba(200,144,42,0.15)",border:"1.5px solid rgba(200,144,42,0.5)",flexShrink:0,color:"#c8902a",fontWeight:700,fontSize:16,lineHeight:1}}>
+    <span>‹</span>
+    <span className="nudge" style={{display:"inline-block",fontSize:20,animation:"manita 1.4s ease-in-out infinite"}}>👆</span>
+    <span>›</span>
   </span>
 );
 
@@ -209,16 +210,19 @@ const subirImg=async(file)=>{
 function VarCard({p,qtyOf,maxed,add,dec}){
   const vs=p.variantes;
   const [i,setI]=useState(0);
+  const [visto,setVisto]=useState(false);
   const ref=useRef(null);
   const onScroll=()=>{
     const el=ref.current;
     if(!el||!el.clientWidth)return;
+    if(!visto&&el.scrollLeft>8)setVisto(true);
     const n=Math.max(0,Math.min(vs.length-1,Math.round(el.scrollLeft/el.clientWidth)));
     if(n!==i)setI(n);
   };
   const go=n=>{
     const el=ref.current;
     if(!el)return;
+    setVisto(true);
     const k=Math.max(0,Math.min(vs.length-1,n));
     el.scrollTo({left:k*el.clientWidth,behavior:"smooth"});
   };
@@ -229,7 +233,7 @@ function VarCard({p,qtyOf,maxed,add,dec}){
       stock:Number.isFinite(st)?st:undefined,imagen_url:v.imagen_url||p.imagen_url,emoji:v.emoji||p.emoji||"✨"};
   };
   const flecha=(dir,k)=>(
-    <button onClick={()=>go(k)} aria-label={dir<0?"Anterior":"Siguiente"} style={{position:"absolute",top:"50%",[dir<0?"left":"right"]:8,transform:"translateY(-50%)",width:34,height:34,borderRadius:"50%",border:"none",background:"rgba(26,21,16,0.55)",color:"white",fontSize:20,lineHeight:1,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>{dir<0?"‹":"›"}</button>
+    <button onClick={()=>go(k)} aria-label={dir<0?"Anterior":"Siguiente"} style={{position:"absolute",top:"50%",[dir<0?"left":"right"]:8,transform:"translateY(-50%)",width:42,height:42,borderRadius:"50%",border:"2px solid white",background:"rgba(200,144,42,0.92)",color:"white",fontSize:28,fontWeight:700,lineHeight:1,paddingBottom:3,boxShadow:"0 2px 10px rgba(0,0,0,0.35)",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>{dir<0?"‹":"›"}</button>
   );
   return(
     <div style={{background:"white",borderRadius:20,border:"1px solid #e0d8cc",overflow:"hidden"}}>
@@ -250,6 +254,12 @@ function VarCard({p,qtyOf,maxed,add,dec}){
             <div key={v.id} style={{display:"flex",flexDirection:"column"}}>
               <div style={{position:"relative",width:"100%",aspectRatio:"4/3",background:it.imagen_url?"url("+it.imagen_url+") center/cover":"#f0ecf5",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"3.5rem",opacity:agotado?0.55:1}}>
                 {!it.imagen_url&&it.emoji}
+                {k===0&&vs.length>1&&!visto&&(
+                  <div style={{position:"absolute",bottom:14,left:"50%",transform:"translateX(-50%)",display:"flex",alignItems:"center",gap:10,padding:"8px 18px",borderRadius:50,background:"rgba(26,21,16,0.78)",color:"white",fontSize:14,fontWeight:500,pointerEvents:"none",boxShadow:"0 2px 12px rgba(0,0,0,0.4)",whiteSpace:"nowrap"}}>
+                    <span className="nudge" style={{display:"inline-block",fontSize:26,lineHeight:1,animation:"manita 1.4s ease-in-out infinite"}}>👆</span>
+                    <span>Desliza para ver más</span>
+                  </div>
+                )}
                 {agotado&&<span style={{position:"absolute",top:10,left:10,background:"#1a1510",color:"white",fontSize:11,padding:"3px 10px",borderRadius:50}}>Agotado</span>}
                 {k>0&&flecha(-1,k-1)}
                 {k<vs.length-1&&flecha(1,k+1)}
@@ -376,6 +386,8 @@ function Tienda({onAdmin}){
   const [sess,setSess]=useState(null);
   const [authOpen,setAuthOpen]=useState(false);
   const [misOpen,setMisOpen]=useState(false);
+  const [rol,setRol]=useState(null);
+  const [surtOpen,setSurtOpen]=useState(false);
   const [recov,setRecov]=useState(null);
   const [toast,setToast]=useState("");
   const [loading,setLoading]=useState(true);
@@ -431,10 +443,17 @@ function Tienda({onAdmin}){
     setAddr(a=>({...a,nombre:a.nombre||m.nombre||"",telefono:a.telefono||m.telefono||""}));
   },[sess]);
 
+  useEffect(()=>{
+    if(!sess){setRol(null);return;}
+    let vivo=true;
+    obtenerRol(sess.access_token,sess.user&&sess.user.id).then(r=>{if(vivo)setRol(r);}).catch(()=>{});
+    return()=>{vivo=false;};
+  },[sess]);
+
   const cerrarSesion=async()=>{
     const sv=loadSess();
     if(sv)authFetch("logout",null,"POST",sv.access_token).catch(()=>{});
-    saveSess(null);setSess(null);setMisOpen(false);toast2("Sesión cerrada");
+    saveSess(null);setSess(null);setRol(null);setMisOpen(false);setSurtOpen(false);toast2("Sesión cerrada");
   };
 
   const cats=["Todos",...CATS.filter(c=>prods.some(p=>p.categoria===c))];
@@ -494,7 +513,7 @@ function Tienda({onAdmin}){
       <nav style={{position:"sticky",top:0,zIndex:100,background:"rgba(250,247,242,0.95)",backdropFilter:"blur(12px)",borderBottom:"1px solid #e0d8cc",padding:"0 20px",height:60,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
         <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:22,fontWeight:600}}><span style={{color:"#c8902a"}}>☽</span> Aether<span style={{color:"#c8902a"}}>.</span></div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
-        <button onClick={()=>sess?setMisOpen(true):setAuthOpen(true)} style={{padding:"7px 13px",border:"1.5px solid #1a1510",borderRadius:50,background:sess?"#1a1510":"transparent",color:sess?"#faf7f2":"#1a1510",cursor:"pointer",fontSize:13,whiteSpace:"nowrap"}}>{sess?"📦 Mis pedidos":"👤 Entrar"}</button>
+        <button onClick={()=>sess?(rol==="surtidor"?setSurtOpen(true):setMisOpen(true)):setAuthOpen(true)} style={{padding:"7px 13px",border:"1.5px solid #1a1510",borderRadius:50,background:sess?"#1a1510":"transparent",color:sess?"#faf7f2":"#1a1510",cursor:"pointer",fontSize:13,whiteSpace:"nowrap"}}>{sess?(rol==="surtidor"?"📋 Surtir":"📦 Mis pedidos"):"👤 Entrar"}</button>
         <button onClick={()=>setDrawer(true)} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 16px",border:"1.5px solid #1a1510",borderRadius:50,background:"transparent",cursor:"pointer",fontSize:13,position:"relative"}}>
           🛍 Carrito
           {piezas>0&&<span style={{position:"absolute",top:-6,right:-6,minWidth:18,height:18,padding:"0 4px",background:"#c8902a",color:"white",borderRadius:9,fontSize:10,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700}}>{piezas}</span>}
@@ -623,6 +642,7 @@ function Tienda({onAdmin}){
       )}
 
       {authOpen&&<AuthModal onClose={()=>setAuthOpen(false)} onSession={n=>{setSess(n);setAuthOpen(false);toast2("✅ Sesión iniciada");}}/>}
+      {surtOpen&&sess&&rol==="surtidor"&&<Surtir sess={sess} onClose={()=>setSurtOpen(false)} onLogout={cerrarSesion} onMis={()=>{setSurtOpen(false);setMisOpen(true);}}/>}
       {misOpen&&sess&&<MisPedidos sess={sess} cfg={cfg} onClose={()=>setMisOpen(false)} onLogout={cerrarSesion}/>}
       {recov&&<RecoverModal sess={recov} onClose={()=>setRecov(null)} onDone={n=>{setSess(n);setRecov(null);toast2("✅ Contraseña actualizada");}}/>}
       {ticket&&<Ticket nota={sess?"Sigue el status de tu pedido en 📦 Mis pedidos.":"Crea tu cuenta (👤 Entrar) para seguir el status de tus próximos pedidos."} t={ticket} cfg={cfg} onClose={()=>setTicket(null)} waLabel="Enviar pedido por WhatsApp 📲" waUrl={"https://wa.me/"+(cfg.whatsapp||"525648229075")+"?text="+encodeURIComponent(waMsg(ticket,cfg))}/>}
@@ -850,6 +870,7 @@ function DetallePed({ped,cfg,onClose,onSt}){
             ))}
           </div>
         </div>
+        {ped.confirmado_en&&<div style={{marginBottom:12,padding:"8px 12px",borderRadius:10,background:"rgba(34,139,34,0.08)",color:"#2d7a2d",fontSize:12}}>✅ Confirmado por el surtidor · {new Date(ped.confirmado_en).toLocaleString("es-MX",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</div>}
         <button onClick={()=>setVerTicket(true)} style={{...B("#c8902a"),marginBottom:10}}>🧾 Ver ticket de venta</button>
         <button onClick={notif} style={{...B("#25D366")}}>Notificar al cliente por WhatsApp 📲</button>
       </div>
@@ -1274,6 +1295,145 @@ function MisPedidos({sess,cfg,onClose,onLogout}){
         ))}
       </div>
       {ticket&&<Ticket t={ticket} cfg={cfg} onClose={()=>setTicket(null)}/>}
+    </div>
+  );
+}
+
+/* ── SURTIDOR: solo ve pedidos y pasa Nuevo → Confirmado ── */
+const obtenerRol=async(token,uid)=>{
+  if(!token||!uid)return null;
+  const r=await udb(token,"roles_usuario","GET",null,"?select=rol&user_id=eq."+uid);
+  return Array.isArray(r)&&r[0]&&r[0].rol?r[0].rol:null;
+};
+const cargarSurtir=async(token)=>{
+  const [a,b]=await Promise.all([
+    udb(token,"pedidos","GET",null,"?select=*&status=eq.nuevo&order=created_at.asc"),
+    udb(token,"pedidos","GET",null,"?select=*&status=eq.confirmado&order=created_at.desc&limit=20"),
+  ]);
+  if(!Array.isArray(a)||!Array.isArray(b))return null;
+  const peds=[...a,...b];
+  const items={};
+  if(peds.length){
+    const it=await udb(token,"pedido_items","GET",null,"?select=*&pedido_id=in.("+peds.map(x=>x.id).join(",")+")");
+    if(Array.isArray(it))it.forEach(x=>{(items[x.pedido_id]=items[x.pedido_id]||[]).push(x);});
+  }
+  return {peds,items};
+};
+const confirmarSurtir=async(token,id)=>{
+  const r=await fetch(SB_URL+"/rest/v1/rpc/surtir_pedido",{method:"POST",headers:{"apikey":SB_KEY,"Authorization":"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({p_id:String(id)})});
+  if(r.ok)return {ok:true};
+  const j=await r.json().catch(()=>({}));
+  return {ok:false,msg:(j&&(j.message||j.hint))||"No se pudo confirmar el pedido."};
+};
+const hace=(d,ahora=Date.now())=>{
+  const m=Math.max(0,Math.round((ahora-new Date(d).getTime())/60000));
+  if(m<1)return "hace un momento";
+  if(m<60)return "hace "+m+" min";
+  const h=Math.floor(m/60);
+  if(h<24)return "hace "+h+" h";
+  const dd=Math.floor(h/24);
+  return "hace "+dd+(dd===1?" día":" días");
+};
+function Surtir({sess,onClose,onLogout,onMis}){
+  const [datos,setDatos]=useState(null);
+  const [error,setError]=useState("");
+  const [msg,setMsg]=useState("");
+  const [busy,setBusy]=useState(null);
+  const [tab,setTab]=useState("nuevo");
+  const [act,setAct]=useState(null);
+  const avisar=m=>{setMsg(m);setTimeout(()=>setMsg(""),3500);};
+
+  const cargar=async()=>{
+    try{
+      const sv=await validSess();
+      if(!sv){onLogout();return;}
+      const r=await cargarSurtir(sv.access_token);
+      if(!r){setError("No se pudieron cargar los pedidos. Revisa que se haya ejecutado el SQL del surtidor.");return;}
+      setError("");setDatos(r);setAct(new Date());
+    }catch(e){setError("Sin conexión. Se reintentará solo.");}
+  };
+  useEffect(()=>{cargar();const iv=setInterval(cargar,30000);return()=>clearInterval(iv);},[]);
+
+  const confirmar=async(ped)=>{
+    if(!window.confirm("¿Confirmar el pedido "+ped.folio+"?"))return;
+    setBusy(ped.id);
+    try{
+      const sv=await validSess();
+      if(!sv){onLogout();return;}
+      const r=await confirmarSurtir(sv.access_token,ped.id);
+      if(r.ok){
+        setDatos(d=>({...d,peds:d.peds.map(x=>x.id===ped.id?{...x,status:"confirmado"}:x)}));
+        avisar("✅ Pedido "+ped.folio+" confirmado");
+      }else{avisar("⚠️ "+r.msg);cargar();}
+    }catch(e){avisar("⚠️ Sin conexión. Inténtalo de nuevo.");}
+    setBusy(null);
+  };
+
+  const nuevos=datos?datos.peds.filter(x=>x.status==="nuevo"):[];
+  const conf=datos?datos.peds.filter(x=>x.status==="confirmado").slice(0,20):[];
+  const lista=tab==="nuevo"?nuevos:conf;
+  const tabBtn=(k,l)=><button onClick={()=>setTab(k)} style={{flex:1,padding:"10px 0",border:"none",borderBottom:"2px solid "+(tab===k?"#c8902a":"#e0d8cc"),background:"transparent",color:tab===k?"#c8902a":"#7a6e60",cursor:"pointer",fontSize:14,fontWeight:500}}>{l}</button>;
+
+  return(
+    <div style={{position:"fixed",inset:0,background:"#faf7f2",zIndex:650,overflowY:"auto"}}>
+      <div style={{maxWidth:480,margin:"0 auto",padding:"0 16px 70px"}}>
+        <div style={{position:"sticky",top:0,background:"rgba(250,247,242,0.96)",backdropFilter:"blur(10px)",padding:"16px 0 12px",borderBottom:"1px solid #e0d8cc",display:"flex",justifyContent:"space-between",alignItems:"center",zIndex:2}}>
+          <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.6rem",fontWeight:600}}>📋 Surtir pedidos</div>
+          <button onClick={onClose} style={{width:36,height:36,border:"1.5px solid #e0d8cc",borderRadius:"50%",background:"transparent",cursor:"pointer",fontSize:15,color:"#7a6e60"}}>✕</button>
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",margin:"12px 0 4px",gap:8}}>
+          <div style={{fontSize:12,color:"#7a6e60",overflow:"hidden",textOverflow:"ellipsis"}}>{sess.user&&sess.user.email}</div>
+          <div style={{display:"flex",gap:6}}>
+            <button onClick={onMis} style={{padding:"5px 12px",border:"1.5px solid #e0d8cc",borderRadius:50,background:"transparent",cursor:"pointer",fontSize:11,whiteSpace:"nowrap"}}>Mis compras</button>
+            <button onClick={onLogout} style={{padding:"5px 12px",border:"1.5px solid #e0d8cc",borderRadius:50,background:"transparent",cursor:"pointer",fontSize:11,whiteSpace:"nowrap"}}>Cerrar sesión</button>
+          </div>
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6,fontSize:11,color:"#7a6e60"}}>
+          <span>Se actualiza solo cada 30 s{act?" · "+act.toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"}):""}</span>
+          <button onClick={cargar} style={{padding:"4px 12px",border:"1.5px solid #c8902a",borderRadius:50,background:"transparent",color:"#c8902a",cursor:"pointer",fontSize:12}}>↻ Actualizar</button>
+        </div>
+        <div style={{display:"flex",marginBottom:14}}>
+          {tabBtn("nuevo","Por surtir ("+nuevos.length+")")}
+          {tabBtn("confirmado","Confirmados ("+conf.length+")")}
+        </div>
+
+        {error&&<div style={{padding:"10px 12px",borderRadius:10,background:"rgba(200,50,50,0.08)",color:"#c0392b",fontSize:13,lineHeight:1.5,marginBottom:12}}>{error}</div>}
+        {!datos&&!error&&<Spin/>}
+        {datos&&lista.length===0&&<div style={{textAlign:"center",padding:"50px 10px",color:"#7a6e60",fontSize:14}}>{tab==="nuevo"?"🌙 No hay pedidos por surtir":"Aún no hay pedidos confirmados"}</div>}
+        {lista.map(ped=>{
+          const its=(datos&&datos.items[ped.id])||[];
+          const piezas=its.reduce((a,i)=>a+(Number(i.cantidad)||0),0);
+          return(
+            <div key={ped.id} style={{background:"white",borderRadius:16,border:"1px solid "+(ped.status==="nuevo"?"#c8902a":"#e0d8cc"),padding:"14px 16px",marginBottom:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                <div>
+                  <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:19,fontWeight:600}}>{ped.folio}</div>
+                  <div style={{fontSize:12,color:"#7a6e60"}}>{hace(ped.created_at)} · {fmtFecha(ped.created_at)}</div>
+                </div>
+                <span style={{fontSize:11,padding:"3px 10px",borderRadius:50,background:(ST_COLORS[ped.status]||"#999")+"22",color:ST_COLORS[ped.status]||"#999",whiteSpace:"nowrap"}}>{ST_LABELS[ped.status]||ped.status}</span>
+              </div>
+              <div style={{borderTop:"1px dashed #e0d8cc",borderBottom:"1px dashed #e0d8cc",padding:"8px 0",margin:"4px 0 10px"}}>
+                {its.length===0&&<div style={{fontSize:12,color:"#7a6e60"}}>Cargando productos…</div>}
+                {its.map(it=>(
+                  <div key={it.id} style={{display:"flex",gap:10,alignItems:"baseline",fontSize:14,padding:"3px 0"}}>
+                    <b style={{minWidth:34,color:"#c8902a"}}>{it.cantidad}×</b>
+                    <span>{it.nombre}</span>
+                  </div>
+                ))}
+                {its.length>0&&<div style={{fontSize:11,color:"#7a6e60",marginTop:6}}>{piezas} {piezas===1?"pieza":"piezas"} en total</div>}
+              </div>
+              <div style={{fontSize:12,color:"#5a4e40",lineHeight:1.6}}>
+                <div>👤 {ped.cliente_nombre}</div>
+                <div>📍 {ped.cliente_calle}, Col. {ped.cliente_colonia}, CP {ped.cliente_cp}{ped.cliente_alcaldia?", "+ped.cliente_alcaldia:""}</div>
+                {ped.cliente_referencias&&<div>Refs: {ped.cliente_referencias}</div>}
+                <div>{ped.tipo_envio==="cobertura"?"🚚 Entrega en zona":"📦 Paquetería"}</div>
+              </div>
+              {ped.status==="nuevo"&&<button onClick={()=>confirmar(ped)} disabled={busy===ped.id} style={{...B("#2d7a2d"),marginTop:12,opacity:busy===ped.id?0.6:1}}>{busy===ped.id?"Confirmando…":"✅ Confirmar pedido"}</button>}
+            </div>
+          );
+        })}
+      </div>
+      {msg&&<Toast msg={msg}/>}
     </div>
   );
 }
