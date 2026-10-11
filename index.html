@@ -37,7 +37,9 @@ const SB_URL="https://utwpumtpgcolkavqbmmh.supabase.co";
 const SB_KEY="sb_publishable_Y4ktViRftcIlT5hNWmskQg_lvwBSUje";
 const BUCKET="1234";
 
-const hdrs=()=>({"apikey":SB_KEY,"Authorization":"Bearer "+SB_KEY,"Content-Type":"application/json"});
+// Token del administrador (cuenta real). Solo existe mientras el panel Admin está abierto.
+let ADMIN_TOKEN=null;
+const hdrs=()=>({"apikey":SB_KEY,"Authorization":"Bearer "+(ADMIN_TOKEN||SB_KEY),"Content-Type":"application/json"});
 const db=async(table,params="")=>{const r=await fetch(SB_URL+"/rest/v1/"+table+params,{headers:hdrs()});return r.json();};
 const dbw=async(table,method,data,params="")=>{const r=await fetch(SB_URL+"/rest/v1/"+table+params,{method,headers:{...hdrs(),"Prefer":"return=representation"},body:JSON.stringify(data)});return r.json();};
 const dbdel=async(table,params)=>fetch(SB_URL+"/rest/v1/"+table+params,{method:"DELETE",headers:hdrs()});
@@ -73,8 +75,6 @@ const udb=async(token,table,method,data,params="")=>{
   return r.json();
 };
 
-/* ── PIN ── */
-const getPin=()=>localStorage.getItem("aether_pin")||"1234";
 
 /* ── ZONAS DE COBERTURA (CP → zona) ── */
 const CP_ZONA={};
@@ -199,7 +199,7 @@ const subirImg=async(file)=>{
     const blob=await reducir(file);
     const ext=blob.type==="image/jpeg"?"jpg":(file.name.split(".").pop()||"jpg");
     const nom="prod_"+Date.now()+"_"+Math.random().toString(36).slice(2,6)+"."+ext;
-    const r=await fetch(SB_URL+"/storage/v1/object/"+BUCKET+"/"+nom,{method:"POST",headers:{"apikey":SB_KEY,"Authorization":"Bearer "+SB_KEY,"Content-Type":blob.type||file.type,"x-upsert":"true"},body:blob});
+    const r=await fetch(SB_URL+"/storage/v1/object/"+BUCKET+"/"+nom,{method:"POST",headers:{"apikey":SB_KEY,"Authorization":"Bearer "+(ADMIN_TOKEN||SB_KEY),"Content-Type":blob.type||file.type,"x-upsert":"true"},body:blob});
     if(r.ok)return SB_URL+"/storage/v1/object/public/"+BUCKET+"/"+nom;
     alert("Error "+r.status+": "+await r.text());
   }catch(e){alert("Error de conexión al subir la foto.");}
@@ -372,7 +372,7 @@ function Ticket({t,cfg,onClose,waUrl,waLabel,nota}){
 /* ══════════════════════════════════════════════
    TIENDA
 ══════════════════════════════════════════════ */
-function Tienda({onAdmin}){
+function Tienda(){
   const [prods,setProds]=useState([]);
   const [cfg,setCfg]=useState({});
   const [filtro,setFiltro]=useState("Todos");
@@ -386,8 +386,7 @@ function Tienda({onAdmin}){
   const [sess,setSess]=useState(null);
   const [authOpen,setAuthOpen]=useState(false);
   const [misOpen,setMisOpen]=useState(false);
-  const [rol,setRol]=useState(null);
-  const [surtOpen,setSurtOpen]=useState(false);
+  const [rolInfo,setRolInfo]=useState({uid:null,rol:null});
   const [recov,setRecov]=useState(null);
   const [toast,setToast]=useState("");
   const [loading,setLoading]=useState(true);
@@ -443,17 +442,23 @@ function Tienda({onAdmin}){
     setAddr(a=>({...a,nombre:a.nombre||m.nombre||"",telefono:a.telefono||m.telefono||""}));
   },[sess]);
 
+  const uid=sess&&sess.user&&sess.user.id;
+  // undefined = todavía consultando el rol; null = cliente normal
+  const rol=!sess?null:(rolInfo.uid===uid?rolInfo.rol:undefined);
   useEffect(()=>{
-    if(!sess){setRol(null);return;}
+    if(!uid)return;
     let vivo=true;
-    obtenerRol(sess.access_token,sess.user&&sess.user.id).then(r=>{if(vivo)setRol(r);}).catch(()=>{});
+    validSess()
+      .then(sv=>obtenerRol(sv?sv.access_token:sess.access_token,uid))
+      .then(r=>{if(vivo)setRolInfo({uid,rol:r});})
+      .catch(()=>{if(vivo)setRolInfo({uid,rol:null});});
     return()=>{vivo=false;};
-  },[sess]);
+  },[uid]);
 
   const cerrarSesion=async()=>{
     const sv=loadSess();
     if(sv)authFetch("logout",null,"POST",sv.access_token).catch(()=>{});
-    saveSess(null);setSess(null);setRol(null);setMisOpen(false);setSurtOpen(false);toast2("Sesión cerrada");
+    saveSess(null);setSess(null);setMisOpen(false);toast2("Sesión cerrada");
   };
 
   const cats=["Todos",...CATS.filter(c=>prods.some(p=>p.categoria===c))];
@@ -485,26 +490,21 @@ function Tienda({onAdmin}){
       const base={folio:f,cliente_nombre:addr.nombre,cliente_telefono:addr.telefono,cliente_calle:addr.calle,cliente_colonia:addr.colonia,cliente_cp:addr.cp,cliente_alcaldia:addr.alcaldia,cliente_referencias:addr.refs,total,tipo_envio:cpSt==="in"?"cobertura":"paqueteria",status:"nuevo"};
       let tk=null;
       if(sess){tk=await validSess();}
-      let ped=null,conCuenta=false;
-      if(tk){
-        ped=await udb(tk.access_token,"pedidos","POST",{...base,user_id:tk.user.id});
-        conCuenta=Array.isArray(ped)&&!!(ped[0]&&ped[0].id);
-      }
-      if(!conCuenta)ped=await dbw("pedidos","POST",base);
-      const pid=Array.isArray(ped)?(ped[0]&&ped[0].id):(ped&&ped.id);
-      if(pid){
-        const filas=carrito.map(p=>({pedido_id:pid,producto_id:p.id,nombre:p.nombre,precio:p.precio,cantidad:p.qty}));
-        if(conCuenta)await udb(tk.access_token,"pedido_items","POST",filas);
-        else await dbw("pedido_items","POST",filas);
-      }
+      const filas=carrito.map(p=>({producto_id:p.id,nombre:p.nombre,precio:p.precio,cantidad:p.qty}));
+      // todos los pedidos se registran con una función segura; si hay sesión, queda ligado a la cuenta
+      const rr=await fetch(SB_URL+"/rest/v1/rpc/crear_pedido",{method:"POST",headers:{"apikey":SB_KEY,"Authorization":"Bearer "+(tk?tk.access_token:SB_KEY),"Content-Type":"application/json"},body:JSON.stringify({p_pedido:base,p_items:filas})});
+      if(!rr.ok){const ej=await rr.json().catch(()=>({}));throw new Error(ej.message||"rpc");}
       const dir=addr.calle+", Col. "+addr.colonia+", CP "+addr.cp+(addr.alcaldia?", "+addr.alcaldia:"")+(addr.refs?" ("+addr.refs+")":"");
       setTicket({folio:f,fecha:new Date().toISOString(),nombre:addr.nombre,telefono:addr.telefono,dir,items:carrito.map(p=>({nombre:p.nombre,precio:p.precio,cantidad:p.qty})),total,envio:cpSt==="in"?"cobertura":"paqueteria"});
       setCarrito([]);setAddr({nombre:"",telefono:"",calle:"",colonia:"",cp:"",alcaldia:"",refs:""});setCpSt(null);setDrawer(false);
-      toast2(tk&&!conCuenta?"⚠️ Pedido creado, pero no quedó ligado a tu cuenta":"✅ Pedido "+f+" creado");
-    }catch(e){toast2("Error al crear pedido");}
+      toast2("✅ Pedido "+f+" creado");
+    }catch(e){toast2("Error al crear pedido"+(e&&e.message&&e.message!=="rpc"?": "+e.message:""));}
     setEnviando(false);
   };
 
+  if(sess&&rol===undefined)return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Cormorant Garamond',serif",fontSize:"1.5rem",color:"#c8902a"}}>☽ Cargando…</div>;
+  if(sess&&rol==="admin")return <AdminGate sess={sess} onSalir={cerrarSesion}/>;
+  if(sess&&(rol==="surtidor"||rol==="embarques"))return <Operacion rol={rol} sess={sess} onLogout={cerrarSesion}/>;
   if(loading)return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Cormorant Garamond',serif",fontSize:"1.5rem",color:"#c8902a"}}>☽ Cargando…</div>;
 
   return(
@@ -513,7 +513,7 @@ function Tienda({onAdmin}){
       <nav style={{position:"sticky",top:0,zIndex:100,background:"rgba(250,247,242,0.95)",backdropFilter:"blur(12px)",borderBottom:"1px solid #e0d8cc",padding:"0 20px",height:60,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
         <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:22,fontWeight:600}}><span style={{color:"#c8902a"}}>☽</span> Aether<span style={{color:"#c8902a"}}>.</span></div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
-        <button onClick={()=>sess?(rol==="surtidor"?setSurtOpen(true):setMisOpen(true)):setAuthOpen(true)} style={{padding:"7px 13px",border:"1.5px solid #1a1510",borderRadius:50,background:sess?"#1a1510":"transparent",color:sess?"#faf7f2":"#1a1510",cursor:"pointer",fontSize:13,whiteSpace:"nowrap"}}>{sess?(rol==="surtidor"?"📋 Surtir":"📦 Mis pedidos"):"👤 Entrar"}</button>
+        <button onClick={()=>sess?setMisOpen(true):setAuthOpen(true)} style={{padding:"7px 13px",border:"1.5px solid #1a1510",borderRadius:50,background:sess?"#1a1510":"transparent",color:sess?"#faf7f2":"#1a1510",cursor:"pointer",fontSize:13,whiteSpace:"nowrap"}}>{sess?"📦 Mis pedidos":"👤 Entrar"}</button>
         <button onClick={()=>setDrawer(true)} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 16px",border:"1.5px solid #1a1510",borderRadius:50,background:"transparent",cursor:"pointer",fontSize:13,position:"relative"}}>
           🛍 Carrito
           {piezas>0&&<span style={{position:"absolute",top:-6,right:-6,minWidth:18,height:18,padding:"0 4px",background:"#c8902a",color:"white",borderRadius:9,fontSize:10,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700}}>{piezas}</span>}
@@ -642,11 +642,10 @@ function Tienda({onAdmin}){
       )}
 
       {authOpen&&<AuthModal onClose={()=>setAuthOpen(false)} onSession={n=>{setSess(n);setAuthOpen(false);toast2("✅ Sesión iniciada");}}/>}
-      {surtOpen&&sess&&rol==="surtidor"&&<Surtir sess={sess} onClose={()=>setSurtOpen(false)} onLogout={cerrarSesion} onMis={()=>{setSurtOpen(false);setMisOpen(true);}}/>}
       {misOpen&&sess&&<MisPedidos sess={sess} cfg={cfg} onClose={()=>setMisOpen(false)} onLogout={cerrarSesion}/>}
       {recov&&<RecoverModal sess={recov} onClose={()=>setRecov(null)} onDone={n=>{setSess(n);setRecov(null);toast2("✅ Contraseña actualizada");}}/>}
       {ticket&&<Ticket nota={sess?"Sigue el status de tu pedido en 📦 Mis pedidos.":"Crea tu cuenta (👤 Entrar) para seguir el status de tus próximos pedidos."} t={ticket} cfg={cfg} onClose={()=>setTicket(null)} waLabel="Enviar pedido por WhatsApp 📲" waUrl={"https://wa.me/"+(cfg.whatsapp||"525648229075")+"?text="+encodeURIComponent(waMsg(ticket,cfg))}/>}
-      <button onClick={onAdmin} style={{position:"fixed",bottom:20,left:20,width:32,height:32,background:"rgba(0,0,0,0.1)",border:"none",borderRadius:"50%",cursor:"pointer",fontSize:13,color:"rgba(0,0,0,0.2)",zIndex:50}}>⚙</button>
+      <button onClick={()=>sess?toast2("Tu cuenta no es de administrador. Cierra sesión y entra con la cuenta Admin."):setAuthOpen(true)} title="Acceso administrador" style={{position:"fixed",bottom:20,left:20,width:32,height:32,background:"rgba(0,0,0,0.1)",border:"none",borderRadius:"50%",cursor:"pointer",fontSize:13,color:"rgba(0,0,0,0.2)",zIndex:50}}>⚙</button>
       {toast&&<Toast msg={toast}/>}
     </div>
   );
@@ -655,6 +654,17 @@ function Tienda({onAdmin}){
 /* ══════════════════════════════════════════════
    ADMIN
 ══════════════════════════════════════════════ */
+function AdminGate({sess,onSalir}){
+  const [listo,setListo]=useState(false);
+  useEffect(()=>{
+    ADMIN_TOKEN=sess.access_token;setListo(true);
+    // renueva el token cada 5 min para que no caduque a media sesión
+    const t=setInterval(async()=>{const sv=await validSess();if(sv)ADMIN_TOKEN=sv.access_token;},300000);
+    return()=>{clearInterval(t);ADMIN_TOKEN=null;};
+  },[]);
+  return listo?<Admin onSalir={onSalir}/>:null;
+}
+
 function Admin({onSalir}){
   const [sec,setSec]=useState("pedidos");
   const [pedidos,setPedidos]=useState([]);
@@ -745,7 +755,7 @@ function Admin({onSalir}){
     <div style={{fontFamily:"'Jost',sans-serif",background:"#f5f0e8",minHeight:"100vh"}}>
       <div style={{background:"#1a1510",padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
         <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:20,color:"#f0e8d4",fontWeight:600}}>☽ Aether <span style={{color:"#c8902a",fontSize:13,fontWeight:400}}>Admin</span></div>
-        <button onClick={onSalir} style={{fontSize:12,color:"rgba(240,220,180,0.6)",background:"none",border:"1px solid rgba(240,220,180,0.2)",borderRadius:50,padding:"5px 14px",cursor:"pointer"}}>Ver tienda</button>
+        <button onClick={onSalir} style={{fontSize:12,color:"rgba(240,220,180,0.6)",background:"none",border:"1px solid rgba(240,220,180,0.2)",borderRadius:50,padding:"5px 14px",cursor:"pointer"}}>Cerrar sesión</button>
       </div>
 
       {/* STATS */}
@@ -870,6 +880,7 @@ function DetallePed({ped,cfg,onClose,onSt}){
             ))}
           </div>
         </div>
+        {ped.enviado_en&&<div style={{marginBottom:8,padding:"8px 12px",borderRadius:10,background:"rgba(26,111,160,0.08)",color:"#1a6fa0",fontSize:12}}>🚚 Despachado a ruta por embarques · {new Date(ped.enviado_en).toLocaleString("es-MX",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</div>}
         {ped.confirmado_en&&<div style={{marginBottom:12,padding:"8px 12px",borderRadius:10,background:"rgba(34,139,34,0.08)",color:"#2d7a2d",fontSize:12}}>✅ Confirmado por el surtidor · {new Date(ped.confirmado_en).toLocaleString("es-MX",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</div>}
         <button onClick={()=>setVerTicket(true)} style={{...B("#c8902a"),marginBottom:10}}>🧾 Ver ticket de venta</button>
         <button onClick={notif} style={{...B("#25D366")}}>Notificar al cliente por WhatsApp 📲</button>
@@ -914,7 +925,7 @@ function EditorProd({prod,onGuardar,onClose,onElim}){
       const nom="prod_"+Date.now()+"."+ext;
       const r=await fetch(SB_URL+"/storage/v1/object/"+BUCKET+"/"+nom,{
         method:"POST",
-        headers:{"apikey":SB_KEY,"Authorization":"Bearer "+SB_KEY,"Content-Type":file.type,"x-upsert":"true"},
+        headers:{"apikey":SB_KEY,"Authorization":"Bearer "+(ADMIN_TOKEN||SB_KEY),"Content-Type":file.type,"x-upsert":"true"},
         body:file
       });
       if(r.ok)s("imagen_url",SB_URL+"/storage/v1/object/public/"+BUCKET+"/"+nom);
@@ -1042,20 +1053,8 @@ function EditorProd({prod,onGuardar,onClose,onElim}){
 /* ── CONFIG FORM ── */
 function ConfigForm({cfg,onGuardar}){
   const [items,setItems]=useState(cfg.map(c=>({...c})));
-  const [pa,setPa]=useState("");
-  const [pn,setPn]=useState("");
-  const [pc,setPc]=useState("");
-  const [pm,setPm]=useState("");
   const LABELS={whatsapp:"WhatsApp (con código de país)",banco:"Banco",titular:"Titular de cuenta",clabe:"CLABE (18 dígitos)",cuenta:"Número de cuenta",concepto:"Concepto de pago"};
   const set=(clave,valor)=>setItems(pr=>pr.map(i=>i.clave===clave?{...i,valor}:i));
-  const cambiarPin=()=>{
-    if(pa!==getPin()){setPm("❌ PIN actual incorrecto");return;}
-    if(pn.length<4){setPm("❌ Mínimo 4 dígitos");return;}
-    if(pn!==pc){setPm("❌ Los PINs no coinciden");return;}
-    localStorage.setItem("aether_pin",pn);
-    setPa("");setPn("");setPc("");
-    setPm("✅ PIN cambiado");setTimeout(()=>setPm(""),3000);
-  };
   return(
     <div>
       <div style={{background:"white",borderRadius:16,border:"1px solid #e0d8cc",padding:20,marginBottom:16}}>
@@ -1067,17 +1066,6 @@ function ConfigForm({cfg,onGuardar}){
           </div>
         ))}
         <button onClick={()=>onGuardar(items)} style={{...B(),marginTop:4}}>Guardar configuración</button>
-      </div>
-      <div style={{background:"white",borderRadius:16,border:"1px solid #e0d8cc",padding:20}}>
-        <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.3rem",marginBottom:20}}>🔐 Cambiar PIN de admin</div>
-        {[{l:"PIN actual",v:pa,s:setPa},{l:"PIN nuevo",v:pn,s:setPn},{l:"Confirmar PIN nuevo",v:pc,s:setPc}].map(f=>(
-          <div key={f.l} style={{marginBottom:12}}>
-            <label style={{fontSize:12,color:"#7a6e60",display:"block",marginBottom:4}}>{f.l}</label>
-            <input type="password" value={f.v} onChange={e=>f.s(e.target.value)} maxLength={10} style={{...I(),letterSpacing:"0.2em"}}/>
-          </div>
-        ))}
-        {pm&&<div style={{padding:"8px 12px",borderRadius:10,background:pm.startsWith("✅")?"rgba(34,139,34,0.08)":"rgba(200,50,50,0.08)",fontSize:13,marginBottom:12,color:pm.startsWith("✅")?"#2d7a2d":"#c0392b"}}>{pm}</div>}
-        <button onClick={cambiarPin} style={{...B()}}>Cambiar PIN</button>
       </div>
     </div>
   );
@@ -1299,31 +1287,48 @@ function MisPedidos({sess,cfg,onClose,onLogout}){
   );
 }
 
-/* ── SURTIDOR: solo ve pedidos y pasa Nuevo → Confirmado ── */
+/* ── SURTIDO Y EMBARQUES: pantallas de operación, sin catálogo ── */
 const obtenerRol=async(token,uid)=>{
   if(!token||!uid)return null;
   const r=await udb(token,"roles_usuario","GET",null,"?select=rol&user_id=eq."+uid);
   return Array.isArray(r)&&r[0]&&r[0].rol?r[0].rol:null;
 };
-const cargarSurtir=async(token)=>{
-  const [a,b]=await Promise.all([
-    udb(token,"pedidos","GET",null,"?select=*&status=eq.nuevo&order=created_at.asc"),
-    udb(token,"pedidos","GET",null,"?select=*&status=eq.confirmado&order=created_at.desc&limit=20"),
-  ]);
-  if(!Array.isArray(a)||!Array.isArray(b))return null;
-  const peds=[...a,...b];
+const OPS={
+  surtidor:{
+    titulo:"📋 Surtir pedidos",
+    tabs:[
+      {status:"nuevo",label:"Por surtir",orden:"created_at.asc",limite:0,vacio:"🌙 No hay pedidos por surtir"},
+      {status:"confirmado",label:"Surtidos",orden:"created_at.desc",limite:20,vacio:"Aún no hay pedidos surtidos"},
+    ],
+    accion:{rpc:"surtir_pedido",hacia:"confirmado",label:"✅ Confirmar pedido",cargando:"Confirmando…",pregunta:"¿Confirmar el pedido ",hecho:" confirmado"},
+    telefono:false,
+  },
+  embarques:{
+    titulo:"🚚 Embarques",
+    tabs:[
+      {status:"confirmado",label:"Por despachar",orden:"created_at.asc",limite:0,vacio:"🌙 No hay pedidos por despachar"},
+      {status:"enviado",label:"En ruta",orden:"created_at.desc",limite:20,vacio:"Aún no hay pedidos en ruta"},
+    ],
+    accion:{rpc:"despachar_pedido",hacia:"enviado",label:"🚚 Despachar a ruta",cargando:"Despachando…",pregunta:"¿Despachar a ruta el pedido ",hecho:" despachado a ruta"},
+    telefono:true,
+  },
+};
+const cargarOperacion=async(token,cfg)=>{
+  const listas=await Promise.all(cfg.tabs.map(t=>udb(token,"pedidos","GET",null,"?select=*&status=eq."+t.status+"&order="+t.orden+(t.limite?"&limit="+t.limite:""))));
+  if(listas.some(l=>!Array.isArray(l)))return null;
+  const peds=listas.flat();
   const items={};
   if(peds.length){
     const it=await udb(token,"pedido_items","GET",null,"?select=*&pedido_id=in.("+peds.map(x=>x.id).join(",")+")");
     if(Array.isArray(it))it.forEach(x=>{(items[x.pedido_id]=items[x.pedido_id]||[]).push(x);});
   }
-  return {peds,items};
+  return {listas,items};
 };
-const confirmarSurtir=async(token,id)=>{
-  const r=await fetch(SB_URL+"/rest/v1/rpc/surtir_pedido",{method:"POST",headers:{"apikey":SB_KEY,"Authorization":"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({p_id:String(id)})});
+const ejecutarAccion=async(token,rpc,id)=>{
+  const r=await fetch(SB_URL+"/rest/v1/rpc/"+rpc,{method:"POST",headers:{"apikey":SB_KEY,"Authorization":"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({p_id:String(id)})});
   if(r.ok)return {ok:true};
   const j=await r.json().catch(()=>({}));
-  return {ok:false,msg:(j&&(j.message||j.hint))||"No se pudo confirmar el pedido."};
+  return {ok:false,msg:(j&&(j.message||j.hint))||"No se pudo completar la acción."};
 };
 const hace=(d,ahora=Date.now())=>{
   const m=Math.max(0,Math.round((ahora-new Date(d).getTime())/60000));
@@ -1334,12 +1339,13 @@ const hace=(d,ahora=Date.now())=>{
   const dd=Math.floor(h/24);
   return "hace "+dd+(dd===1?" día":" días");
 };
-function Surtir({sess,onClose,onLogout,onMis}){
+function Operacion({rol,sess,onLogout}){
+  const cfg=OPS[rol];
   const [datos,setDatos]=useState(null);
   const [error,setError]=useState("");
   const [msg,setMsg]=useState("");
   const [busy,setBusy]=useState(null);
-  const [tab,setTab]=useState("nuevo");
+  const [tab,setTab]=useState(0);
   const [act,setAct]=useState(null);
   const avisar=m=>{setMsg(m);setTimeout(()=>setMsg(""),3500);};
 
@@ -1347,64 +1353,56 @@ function Surtir({sess,onClose,onLogout,onMis}){
     try{
       const sv=await validSess();
       if(!sv){onLogout();return;}
-      const r=await cargarSurtir(sv.access_token);
-      if(!r){setError("No se pudieron cargar los pedidos. Revisa que se haya ejecutado el SQL del surtidor.");return;}
+      const r=await cargarOperacion(sv.access_token,cfg);
+      if(!r){setError("No se pudieron cargar los pedidos. Revisa que se haya ejecutado el SQL de roles.");return;}
       setError("");setDatos(r);setAct(new Date());
     }catch(e){setError("Sin conexión. Se reintentará solo.");}
   };
   useEffect(()=>{cargar();const iv=setInterval(cargar,30000);return()=>clearInterval(iv);},[]);
 
-  const confirmar=async(ped)=>{
-    if(!window.confirm("¿Confirmar el pedido "+ped.folio+"?"))return;
+  const accionar=async(ped)=>{
+    if(!window.confirm(cfg.accion.pregunta+ped.folio+"?"))return;
     setBusy(ped.id);
     try{
       const sv=await validSess();
       if(!sv){onLogout();return;}
-      const r=await confirmarSurtir(sv.access_token,ped.id);
+      const r=await ejecutarAccion(sv.access_token,cfg.accion.rpc,ped.id);
       if(r.ok){
-        setDatos(d=>({...d,peds:d.peds.map(x=>x.id===ped.id?{...x,status:"confirmado"}:x)}));
-        avisar("✅ Pedido "+ped.folio+" confirmado");
+        setDatos(d=>({...d,listas:[d.listas[0].filter(x=>x.id!==ped.id),[{...ped,status:cfg.accion.hacia},...d.listas[1]]]}));
+        avisar("✅ Pedido "+ped.folio+cfg.accion.hecho);
       }else{avisar("⚠️ "+r.msg);cargar();}
     }catch(e){avisar("⚠️ Sin conexión. Inténtalo de nuevo.");}
     setBusy(null);
   };
 
-  const nuevos=datos?datos.peds.filter(x=>x.status==="nuevo"):[];
-  const conf=datos?datos.peds.filter(x=>x.status==="confirmado").slice(0,20):[];
-  const lista=tab==="nuevo"?nuevos:conf;
-  const tabBtn=(k,l)=><button onClick={()=>setTab(k)} style={{flex:1,padding:"10px 0",border:"none",borderBottom:"2px solid "+(tab===k?"#c8902a":"#e0d8cc"),background:"transparent",color:tab===k?"#c8902a":"#7a6e60",cursor:"pointer",fontSize:14,fontWeight:500}}>{l}</button>;
+  const lista=datos?datos.listas[tab]:[];
+  const tabBtn=(k)=><button key={k} onClick={()=>setTab(k)} style={{flex:1,padding:"10px 0",border:"none",borderBottom:"2px solid "+(tab===k?"#c8902a":"#e0d8cc"),background:"transparent",color:tab===k?"#c8902a":"#7a6e60",cursor:"pointer",fontSize:14,fontWeight:500}}>{cfg.tabs[k].label}{datos?" ("+datos.listas[k].length+")":""}</button>;
 
   return(
-    <div style={{position:"fixed",inset:0,background:"#faf7f2",zIndex:650,overflowY:"auto"}}>
+    <div style={{minHeight:"100vh",background:"#faf7f2"}}>
       <div style={{maxWidth:480,margin:"0 auto",padding:"0 16px 70px"}}>
         <div style={{position:"sticky",top:0,background:"rgba(250,247,242,0.96)",backdropFilter:"blur(10px)",padding:"16px 0 12px",borderBottom:"1px solid #e0d8cc",display:"flex",justifyContent:"space-between",alignItems:"center",zIndex:2}}>
-          <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.6rem",fontWeight:600}}>📋 Surtir pedidos</div>
-          <button onClick={onClose} style={{width:36,height:36,border:"1.5px solid #e0d8cc",borderRadius:"50%",background:"transparent",cursor:"pointer",fontSize:15,color:"#7a6e60"}}>✕</button>
+          <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.6rem",fontWeight:600}}>{cfg.titulo}</div>
+          <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:18,color:"#c8902a"}}>☽ Aether</div>
         </div>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",margin:"12px 0 4px",gap:8}}>
           <div style={{fontSize:12,color:"#7a6e60",overflow:"hidden",textOverflow:"ellipsis"}}>{sess.user&&sess.user.email}</div>
-          <div style={{display:"flex",gap:6}}>
-            <button onClick={onMis} style={{padding:"5px 12px",border:"1.5px solid #e0d8cc",borderRadius:50,background:"transparent",cursor:"pointer",fontSize:11,whiteSpace:"nowrap"}}>Mis compras</button>
-            <button onClick={onLogout} style={{padding:"5px 12px",border:"1.5px solid #e0d8cc",borderRadius:50,background:"transparent",cursor:"pointer",fontSize:11,whiteSpace:"nowrap"}}>Cerrar sesión</button>
-          </div>
+          <button onClick={onLogout} style={{padding:"5px 12px",border:"1.5px solid #e0d8cc",borderRadius:50,background:"transparent",cursor:"pointer",fontSize:11,whiteSpace:"nowrap"}}>Cerrar sesión</button>
         </div>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6,fontSize:11,color:"#7a6e60"}}>
           <span>Se actualiza solo cada 30 s{act?" · "+act.toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"}):""}</span>
           <button onClick={cargar} style={{padding:"4px 12px",border:"1.5px solid #c8902a",borderRadius:50,background:"transparent",color:"#c8902a",cursor:"pointer",fontSize:12}}>↻ Actualizar</button>
         </div>
-        <div style={{display:"flex",marginBottom:14}}>
-          {tabBtn("nuevo","Por surtir ("+nuevos.length+")")}
-          {tabBtn("confirmado","Confirmados ("+conf.length+")")}
-        </div>
+        <div style={{display:"flex",marginBottom:14}}>{cfg.tabs.map((t,k)=>tabBtn(k))}</div>
 
         {error&&<div style={{padding:"10px 12px",borderRadius:10,background:"rgba(200,50,50,0.08)",color:"#c0392b",fontSize:13,lineHeight:1.5,marginBottom:12}}>{error}</div>}
         {!datos&&!error&&<Spin/>}
-        {datos&&lista.length===0&&<div style={{textAlign:"center",padding:"50px 10px",color:"#7a6e60",fontSize:14}}>{tab==="nuevo"?"🌙 No hay pedidos por surtir":"Aún no hay pedidos confirmados"}</div>}
+        {datos&&lista.length===0&&<div style={{textAlign:"center",padding:"50px 10px",color:"#7a6e60",fontSize:14}}>{cfg.tabs[tab].vacio}</div>}
         {lista.map(ped=>{
           const its=(datos&&datos.items[ped.id])||[];
           const piezas=its.reduce((a,i)=>a+(Number(i.cantidad)||0),0);
           return(
-            <div key={ped.id} style={{background:"white",borderRadius:16,border:"1px solid "+(ped.status==="nuevo"?"#c8902a":"#e0d8cc"),padding:"14px 16px",marginBottom:12}}>
+            <div key={ped.id} style={{background:"white",borderRadius:16,border:"1px solid "+(tab===0?"#c8902a":"#e0d8cc"),padding:"14px 16px",marginBottom:12}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
                 <div>
                   <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:19,fontWeight:600}}>{ped.folio}</div>
@@ -1424,11 +1422,12 @@ function Surtir({sess,onClose,onLogout,onMis}){
               </div>
               <div style={{fontSize:12,color:"#5a4e40",lineHeight:1.6}}>
                 <div>👤 {ped.cliente_nombre}</div>
+                {cfg.telefono&&ped.cliente_telefono&&<div>📞 <a href={"tel:"+ped.cliente_telefono} style={{color:"#1a6fa0"}}>{ped.cliente_telefono}</a></div>}
                 <div>📍 {ped.cliente_calle}, Col. {ped.cliente_colonia}, CP {ped.cliente_cp}{ped.cliente_alcaldia?", "+ped.cliente_alcaldia:""}</div>
                 {ped.cliente_referencias&&<div>Refs: {ped.cliente_referencias}</div>}
                 <div>{ped.tipo_envio==="cobertura"?"🚚 Entrega en zona":"📦 Paquetería"}</div>
               </div>
-              {ped.status==="nuevo"&&<button onClick={()=>confirmar(ped)} disabled={busy===ped.id} style={{...B("#2d7a2d"),marginTop:12,opacity:busy===ped.id?0.6:1}}>{busy===ped.id?"Confirmando…":"✅ Confirmar pedido"}</button>}
+              {tab===0&&<button onClick={()=>accionar(ped)} disabled={busy===ped.id} style={{...B(rol==="embarques"?"#1a6fa0":"#2d7a2d"),marginTop:12,opacity:busy===ped.id?0.6:1}}>{busy===ped.id?cfg.accion.cargando:cfg.accion.label}</button>}
             </div>
           );
         })}
@@ -1562,33 +1561,7 @@ function ZonasCP(){
    APP ROOT
 ══════════════════════════════════════════════ */
 function App(){
-  const [vista,setVista]=useState("tienda");
-  const [pin,setPin]=useState("");
-  const [err,setErr]=useState(false);
-
-  const entrar=()=>{
-    if(pin===getPin()){
-      setVista("admin");
-      setPin("");
-      setErr(false);
-    }else{
-      setErr(true);
-      setPin("");
-    }
-  };
-
-  if(vista==="pin")return(
-    <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#1a1208",flexDirection:"column",gap:20,padding:24}}>
-      <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"2rem",color:"#e0aa4a"}}>☽ Admin</div>
-      <input type="password" value={pin} onChange={e=>setPin(e.target.value)} onKeyDown={e=>e.key==="Enter"&&entrar()} placeholder="PIN" maxLength={6}
-        style={{padding:"12px 20px",border:"2px solid "+(err?"#c0392b":"rgba(200,144,42,0.3)"),borderRadius:50,background:"transparent",color:"white",fontSize:18,outline:"none",textAlign:"center",letterSpacing:"0.3em",width:200}}/>
-      {err&&<div style={{color:"#e74c3c",fontSize:13}}>PIN incorrecto</div>}
-      <button onClick={entrar} style={{padding:"12px 32px",background:"#c8902a",color:"white",border:"none",borderRadius:50,fontSize:14,cursor:"pointer",fontWeight:500}}>Entrar</button>
-      <button onClick={()=>{setVista("tienda");setPin("");setErr(false);}} style={{color:"rgba(240,220,180,0.4)",background:"none",border:"none",cursor:"pointer",fontSize:13}}>Volver</button>
-    </div>
-  );
-  if(vista==="admin")return <Admin onSalir={()=>setVista("tienda")}/>;
-  return <Tienda onAdmin={()=>setVista("pin")}/>;
+  return <Tienda/>;
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
