@@ -8,6 +8,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Jost',sans-serif;background:#faf7f2;color:#2e2416}
@@ -330,6 +331,7 @@ function Ticket({t,cfg,onClose,waUrl,waLabel,nota}){
         </div>
         <div style={sep}/>
         <div style={row}><span style={{color:"#7a6e60"}}>Folio</span><b>{t.folio}</b></div>
+        <div style={{margin:"8px 0 4px"}}><QR texto={t.folio} size={92}/></div>
         <div style={row}><span style={{color:"#7a6e60"}}>Fecha</span><span>{fmtFecha(t.fecha)}</span></div>
         <div style={row}><span style={{color:"#7a6e60"}}>Cliente</span><span style={{textAlign:"right"}}>{t.nombre}</span></div>
         <div style={row}><span style={{color:"#7a6e60"}}>Teléfono</span><span>{t.telefono}</span></div>
@@ -675,6 +677,9 @@ function Admin({onSalir}){
   const [detalle,setDetalle]=useState(null);
   const [editP,setEditP]=useState(null);
   const [filtroSt,setFiltroSt]=useState("todos");
+  const [fFecha,setFFecha]=useState("todos");
+  const [busqF,setBusqF]=useState("");
+  const [scan,setScan]=useState(false);
   const t=msg=>{setToast(msg);setTimeout(()=>setToast(""),2500);};
 
   useEffect(()=>{
@@ -747,7 +752,20 @@ function Admin({onSalir}){
     setCfg(items);t("✦ Config guardada");
   };
 
-  const pedF=filtroSt==="todos"?pedidos:pedidos.filter(p=>p.status===filtroSt);
+  // filtros: estado + periodo (para entregados cuenta la fecha de entrega) y buscador por folio, nombre o teléfono
+  const iniPeriodo=f=>{
+    const d=new Date();d.setHours(0,0,0,0);
+    if(f==="hoy")return d;
+    if(f==="semana"){d.setDate(d.getDate()-((d.getDay()+6)%7));return d;}
+    if(f==="mes"){d.setDate(1);return d;}
+    return null;
+  };
+  const fechaPed=p=>new Date(p.status==="entregado"&&p.entregado_en?p.entregado_en:p.created_at);
+  const qBusq=busqF.trim().toLowerCase();
+  const ini=iniPeriodo(fFecha);
+  const pedF=qBusq
+    ?pedidos.filter(p=>String(p.folio||"").toLowerCase().includes(qBusq)||String(p.cliente_nombre||"").toLowerCase().includes(qBusq)||String(p.cliente_telefono||"").includes(qBusq))
+    :pedidos.filter(p=>(filtroSt==="todos"||p.status===filtroSt)&&(!ini||fechaPed(p)>=ini));
 
   if(loading)return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}><Spin/></div>;
 
@@ -786,6 +804,18 @@ function Admin({onSalir}){
                 <button key={k} onClick={()=>setFiltroSt(k)} style={{padding:"5px 12px",borderRadius:50,border:"1.5px solid "+(filtroSt===k?"#c8902a":"#e0d8cc"),background:filtroSt===k?"#c8902a":"white",color:filtroSt===k?"white":"#2e2416",cursor:"pointer",fontSize:12}}>{l}</button>
               ))}
             </div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12,alignItems:"center"}}>
+              {[["todos","Todo"],["hoy","Hoy"],["semana","Esta semana"],["mes","Este mes"]].map(([k,l])=>(
+                <button key={k} onClick={()=>{setFFecha(k);setBusqF("");}} disabled={!!qBusq} style={{padding:"5px 12px",borderRadius:50,border:"1.5px solid "+(fFecha===k&&!qBusq?"#1a1510":"#e0d8cc"),background:fFecha===k&&!qBusq?"#1a1510":"white",color:fFecha===k&&!qBusq?"white":"#2e2416",cursor:qBusq?"default":"pointer",fontSize:12,opacity:qBusq?0.45:1}}>{"📅 "+l}</button>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:8,marginBottom:12}}>
+              <input value={busqF} onChange={e=>setBusqF(e.target.value)} placeholder="🔎 Buscar por folio, nombre o teléfono" style={{...I(),flex:1,minWidth:0}}/>
+              <button onClick={()=>setScan(true)} title="Escanear QR del ticket" style={{padding:"0 16px",borderRadius:12,border:"1.5px solid #c8902a",background:"white",cursor:"pointer",fontSize:20}}>📷</button>
+              {busqF&&<button onClick={()=>setBusqF("")} style={{padding:"0 12px",borderRadius:12,border:"1.5px solid #e0d8cc",background:"white",cursor:"pointer",fontSize:14}}>✕</button>}
+            </div>
+            <div style={{fontSize:12,color:"#7a6e60",marginBottom:10}}>{pedF.length} pedido{pedF.length===1?"":"s"}{qBusq?" encontrados (busca en todos los estados y fechas)":""}</div>
+            {scan&&<Escaner onClose={()=>setScan(false)} onFolio={f=>{setScan(false);setBusqF(String(f).trim());}}/>}
             {pedF.length===0&&<div style={{textAlign:"center",padding:60,color:"#7a6e60"}}>🌙 Sin pedidos</div>}
             {pedF.map(p=>(
               <div key={p.id} onClick={()=>setDetalle(p)} style={{background:"white",borderRadius:16,border:"1px solid #e0d8cc",padding:"14px 16px",marginBottom:10,cursor:"pointer"}}>
@@ -1553,6 +1583,43 @@ function ZonasCP(){
           </div>}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ── QR del folio y escáner con cámara ── */
+function QR({texto,size=96}){
+  let svg="";
+  try{
+    const q=window.qrcode(0,"M");q.addData(String(texto));q.make();
+    svg=q.createSvgTag({cellSize:4,margin:0,scalable:true});
+  }catch(e){return null;}
+  return <div aria-label={"QR del folio "+texto} style={{width:size,height:size,margin:"0 auto"}} dangerouslySetInnerHTML={{__html:svg}}/>;
+}
+
+function Escaner({onFolio,onClose}){
+  const vref=useRef(null);
+  const [msg,setMsg]=useState("Apunta la cámara al QR del ticket");
+  const soporta=typeof window!=="undefined"&&"BarcodeDetector" in window;
+  useEffect(()=>{
+    if(!soporta||!navigator.mediaDevices){setMsg("Este navegador no puede leer QR con la cámara. Escribe el folio en el buscador, o usa Chrome en Android.");return;}
+    let stream=null,timer=null,vivo=true;
+    const det=new window.BarcodeDetector({formats:["qr_code"]});
+    navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"}}}).then(st=>{
+      if(!vivo){st.getTracks().forEach(t=>t.stop());return;}
+      stream=st;const v=vref.current;if(!v)return;v.srcObject=st;v.play().catch(()=>{});
+      timer=setInterval(async()=>{
+        try{const r=await det.detect(v);if(r&&r[0]&&r[0].rawValue){clearInterval(timer);onFolio(r[0].rawValue);}}catch(e){}
+      },400);
+    }).catch(()=>setMsg("No se pudo abrir la cámara. Revisa el permiso del navegador."));
+    return()=>{vivo=false;if(timer)clearInterval(timer);if(stream)stream.getTracks().forEach(t=>t.stop());};
+  },[]);
+  return(
+    <div style={{position:"fixed",inset:0,zIndex:400,background:"rgba(10,8,4,0.92)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16,padding:20}}>
+      <div style={{color:"#f0e8d4",fontFamily:"'Cormorant Garamond',serif",fontSize:"1.4rem"}}>📷 Escanear ticket</div>
+      {soporta&&<video ref={vref} playsInline muted style={{width:"min(100%,360px)",aspectRatio:"1",objectFit:"cover",borderRadius:16,border:"2px solid #c8902a",background:"#000"}}/>}
+      <div style={{color:"rgba(240,232,212,0.75)",fontSize:13,textAlign:"center",maxWidth:320}}>{msg}</div>
+      <button onClick={onClose} style={{padding:"11px 28px",borderRadius:50,border:"1.5px solid rgba(240,232,212,0.5)",background:"transparent",color:"#f0e8d4",cursor:"pointer",fontSize:14}}>Cerrar</button>
     </div>
   );
 }
