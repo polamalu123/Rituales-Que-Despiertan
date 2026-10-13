@@ -1,0 +1,1637 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Aether ☽ — Rituales que despiertan</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,400&family=Jost:wght@300;400;500&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Jost',sans-serif;background:#faf7f2;color:#2e2416}
+@keyframes spin{to{transform:rotate(360deg)}}
+.snap{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
+.snap::-webkit-scrollbar{display:none}
+.snap>*{flex:0 0 100%;scroll-snap-align:start;min-width:0}
+@keyframes nudge{0%,100%{transform:translateX(-3px)}50%{transform:translateX(3px)}}
+@keyframes manita{0%,100%{transform:translateX(-14px) rotate(-10deg)}50%{transform:translateX(14px) rotate(10deg)}}
+@media (prefers-reduced-motion:reduce){.nudge{animation:none!important}}
+@media print{
+  body *{visibility:hidden!important}
+  #ticket,#ticket *{visibility:visible!important}
+  #ticket{position:absolute!important;left:0;top:0;width:100%!important;max-width:380px;box-shadow:none!important;border-radius:0!important}
+  .ticket-overlay{position:absolute!important;overflow:visible!important;background:none!important;inset:auto!important}
+  .no-print{display:none!important}
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useCallback,useRef}=React;
+
+/* ── CONFIG ── */
+const SB_URL="https://utwpumtpgcolkavqbmmh.supabase.co";
+const SB_KEY="sb_publishable_Y4ktViRftcIlT5hNWmskQg_lvwBSUje";
+const BUCKET="1234";
+
+// Token del administrador (cuenta real). Solo existe mientras el panel Admin está abierto.
+let ADMIN_TOKEN=null;
+const hdrs=()=>({"apikey":SB_KEY,"Authorization":"Bearer "+(ADMIN_TOKEN||SB_KEY),"Content-Type":"application/json"});
+const db=async(table,params="")=>{const r=await fetch(SB_URL+"/rest/v1/"+table+params,{headers:hdrs()});return r.json();};
+const dbw=async(table,method,data,params="")=>{const r=await fetch(SB_URL+"/rest/v1/"+table+params,{method,headers:{...hdrs(),"Prefer":"return=representation"},body:JSON.stringify(data)});return r.json();};
+const dbdel=async(table,params)=>fetch(SB_URL+"/rest/v1/"+table+params,{method:"DELETE",headers:hdrs()});
+const dbup=async(table,data,conflict)=>{const r=await fetch(SB_URL+"/rest/v1/"+table+"?on_conflict="+conflict,{method:"POST",headers:{...hdrs(),"Prefer":"resolution=merge-duplicates,return=representation"},body:JSON.stringify(data)});return r.json();};
+
+/* ── CUENTAS DE CLIENTE (Supabase Auth) ── */
+const SESS_KEY="aether_session";
+const loadSess=()=>{try{return JSON.parse(localStorage.getItem(SESS_KEY)||"null");}catch(e){return null;}};
+const saveSess=v=>{try{if(v)localStorage.setItem(SESS_KEY,JSON.stringify(v));else localStorage.removeItem(SESS_KEY);}catch(e){}};
+const authFetch=async(path,body,method="POST",token)=>{
+  const r=await fetch(SB_URL+"/auth/v1/"+path,{method,headers:{"apikey":SB_KEY,"Content-Type":"application/json",...(token?{"Authorization":"Bearer "+token}:{})},body:body?JSON.stringify(body):undefined});
+  const data=await r.json().catch(()=>({}));
+  return {ok:r.ok,status:r.status,data};
+};
+const normSess=d=>({access_token:d.access_token,refresh_token:d.refresh_token,expires_at:d.expires_at||Math.floor(Date.now()/1000)+(d.expires_in||3600),user:d.user});
+const refreshSess=async(sv)=>{
+  try{
+    const r=await authFetch("token?grant_type=refresh_token",{refresh_token:sv.refresh_token});
+    if(r.ok&&r.data.access_token){const n=normSess(r.data);saveSess(n);return n;}
+    if(r.status>=400&&r.status<500){saveSess(null);return null;}
+  }catch(e){}
+  return sv;
+};
+const validSess=async()=>{
+  let sv=loadSess();
+  if(!sv)return null;
+  if(sv.expires_at-60<Date.now()/1000)sv=await refreshSess(sv);
+  return sv;
+};
+// peticiones a la base de datos con el token del cliente
+const udb=async(token,table,method,data,params="")=>{
+  const r=await fetch(SB_URL+"/rest/v1/"+table+params,{method,headers:{"apikey":SB_KEY,"Authorization":"Bearer "+token,"Content-Type":"application/json","Prefer":"return=representation"},body:data?JSON.stringify(data):undefined});
+  return r.json();
+};
+
+
+/* ── ZONAS DE COBERTURA (CP → zona) ── */
+const CP_ZONA={};
+const addRango=(zona,desde,hasta,paso=10)=>{
+  for(let n=desde;n<=hasta;n+=paso)CP_ZONA[String(n).padStart(5,"0")]=zona;
+};
+const addLista=(zona,lista)=>lista.forEach(c=>{CP_ZONA[c]=zona;});
+
+// Nezahualcóyotl
+addRango("Neza",57000,57990);
+addLista("Neza",["57003","57103","57129","57138","57139","57158","57171","57178","57179","57185"]);
+// Chimalhuacán (parte oeste)
+for(let d=5633;d<=5639;d++){
+  [0,4,5,6,7,8,9].forEach(u=>{CP_ZONA[String(d)+u]="Chimalhuacán";});
+}
+// Iztapalapa
+addRango("Iztapalapa",9000,9890);
+// Gustavo A. Madero
+addRango("Gustavo A. Madero",7000,7990);
+// Venustiano Carranza
+addRango("Venustiano Carranza",15000,15990);
+// Iztacalco
+addRango("Iztacalco",8000,8990);
+// Cuauhtémoc
+addRango("Cuauhtémoc",6000,6990);
+// Ecatepec
+addRango("Ecatepec",55000,55550);
+// Ixtapaluca
+addLista("Ixtapaluca",["56530","56535","56536","56537","56540","56545","56550","56553","56555","56560","56565","56566","56567","56568","56569","56570","56573","56574","56575","56576","56577","56578","56579","56580","56583","56585","56586","56587","56588","56589","56590","56593","56594","56595","56596","56597","56598","56599"]);
+
+// Base + cambios hechos desde Admin (tabla zonas_cp: cp, zona, activo)
+const mapaCP=(rows)=>{
+  const m={...CP_ZONA};
+  (Array.isArray(rows)?rows:[]).forEach(r=>{
+    if(!r||!r.cp)return;
+    if(r.activo===false)delete m[r.cp];else m[r.cp]=r.zona;
+  });
+  return m;
+};
+
+/* ── DATOS ── */
+const CATS=["Veladoras","Incienso","Protecciones","Hierbas en té","Hierbas para baño","Sales","Esencias y concentrados","Alcoholes","Accesorios","Cuarzos"];
+const ST_LABELS={nuevo:"🆕 Nuevo",confirmado:"✅ Confirmado",enviado:"🚚 Enviado",entregado:"🏠 Entregado",cancelado:"❌ Cancelado"};
+const ST_COLORS={nuevo:"#c8902a",confirmado:"#2d7a2d",enviado:"#1a6fa0",entregado:"#5a3d8a",cancelado:"#c0392b"};
+const FAQS=[
+  {q:"¿Cómo pago?",a:"Pago por transferencia bancaria. Al confirmar tu pedido te enviamos los datos por WhatsApp."},
+  {q:"¿A qué zonas entregan?",a:"Sin costo en Neza, Chimalhuacán, Ixtapaluca, Iztapalapa, Gustavo A. Madero, Venustiano Carranza, Iztacalco, Cuauhtémoc y Ecatepec. Fuera de esa zona enviamos por paquetería."},
+  {q:"¿Cuánto tarda el envío?",a:"En zona de cobertura 1–2 días hábiles. Por paquetería 3–5 días."},
+  {q:"¿Puedo cancelar mi pedido?",a:"Sí, contáctanos por WhatsApp antes de que el pedido salga a envío."},
+  {q:"¿Los productos están consagrados?",a:"Cada producto pasa por una limpieza energética antes de empacarse."},
+];
+const folio=()=>"AE"+Date.now().toString(36).toUpperCase().slice(-6);
+
+/* ── UI HELPERS ── */
+const I=(extra={})=>({width:"100%",padding:"9px 12px",border:"1.5px solid #e0d8cc",borderRadius:10,fontFamily:"'Jost',sans-serif",fontSize:13,outline:"none",background:"white",...extra});
+const B=(bg="#1a1510",extra={})=>({width:"100%",padding:13,background:bg,color:"white",border:"none",borderRadius:50,fontFamily:"'Jost',sans-serif",fontSize:14,cursor:"pointer",fontWeight:500,...extra});
+const Toast=({msg})=><div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:"#1a1510",color:"#faf7f2",padding:"10px 22px",borderRadius:50,fontSize:13,zIndex:9999,pointerEvents:"none",whiteSpace:"nowrap",boxShadow:"0 8px 30px rgba(0,0,0,0.3)"}}>{msg}</div>;
+const Spin=()=><div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:60}}><div style={{width:32,height:32,border:"3px solid #e0d8cc",borderTop:"3px solid #c8902a",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/></div>;
+
+const Stepper=({q,onMinus,onPlus,maxed,big})=>{
+  const bt=(dis)=>({width:big?36:30,height:big?36:30,border:"none",borderRadius:"50%",background:dis?"#d8d0c2":"#1a1510",color:"white",fontSize:big?20:18,lineHeight:1,cursor:dis?"not-allowed":"pointer",display:"flex",alignItems:"center",justifyContent:"center"});
+  return(
+    <div style={{display:"flex",alignItems:"center",gap:big?12:8}}>
+      <button onClick={onMinus} aria-label="Quitar una pieza" style={bt(false)}>−</button>
+      <span style={{minWidth:20,textAlign:"center",fontWeight:600,fontSize:big?16:14}}>{q}</span>
+      <button onClick={onPlus} disabled={maxed} aria-label="Agregar una pieza" style={bt(maxed)}>+</button>
+    </div>
+  );
+};
+
+// ── SKU: 2 consonantes del tipo + 2 consonantes del material + consecutivo ──
+const consonantes=(txt,n=2)=>{
+  const limpio=String(txt||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toUpperCase().replace(/[^A-Z]/g,"");
+  return (limpio.replace(/[AEIOU]/g,"")+"XX").slice(0,n);
+};
+const prefijoSku=(categoria,material)=>consonantes(categoria)+consonantes(material);
+// el consecutivo lo entrega la base de datos y nunca se reutiliza, aunque se elimine un producto
+const siguienteSku=async(prefijo)=>{
+  try{
+    const r=await fetch(SB_URL+"/rest/v1/rpc/siguiente_sku",{method:"POST",headers:hdrs(),body:JSON.stringify({p_prefijo:prefijo})});
+    const j=await r.json();
+    if(r.ok&&typeof j==="string")return j;
+    alert("No se pudo generar el SKU: "+((j&&(j.message||j.hint))||r.status)+"\n\nEjecuta primero en Supabase → SQL Editor el código de SKU que te dio Claude.");
+  }catch(e){alert("Sin conexión al generar el SKU.");}
+  return null;
+};
+
+// icono que indica que se puede deslizar de lado
+const SwipeIcon=()=>(
+  <span title="Desliza para ver más modelos" aria-label="Desliza para ver más modelos" style={{display:"inline-flex",alignItems:"center",gap:2,padding:"4px 10px",borderRadius:50,background:"rgba(200,144,42,0.15)",border:"1.5px solid rgba(200,144,42,0.5)",flexShrink:0,color:"#c8902a",fontWeight:700,fontSize:16,lineHeight:1}}>
+    <span>‹</span>
+    <span className="nudge" style={{display:"inline-block",fontSize:20,animation:"manita 1.4s ease-in-out infinite"}}>👆</span>
+    <span>›</span>
+  </span>
+);
+
+// clave única de una línea del carrito (producto o producto+variante)
+const kOf=p=>p.key||String(p.id);
+
+// reduce la foto antes de subirla (más rápido en celular)
+const reducir=(file,max=1200)=>new Promise(res=>{
+  try{
+    if(!file.type||!file.type.startsWith("image/")||file.type==="image/gif"){res(file);return;}
+    const url=URL.createObjectURL(file);
+    const img=new Image();
+    img.onload=()=>{
+      try{
+        const sc=Math.min(1,max/Math.max(img.width,img.height));
+        if(sc>=1&&file.size<600000){URL.revokeObjectURL(url);res(file);return;}
+        const c=document.createElement("canvas");
+        c.width=Math.round(img.width*sc);c.height=Math.round(img.height*sc);
+        c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+        c.toBlob(b=>{URL.revokeObjectURL(url);res(b&&b.size<file.size?b:file);},"image/jpeg",0.82);
+      }catch(e){res(file);}
+    };
+    img.onerror=()=>{URL.revokeObjectURL(url);res(file);};
+    img.src=url;
+  }catch(e){res(file);}
+});
+const subirImg=async(file)=>{
+  try{
+    const blob=await reducir(file);
+    const ext=blob.type==="image/jpeg"?"jpg":(file.name.split(".").pop()||"jpg");
+    const nom="prod_"+Date.now()+"_"+Math.random().toString(36).slice(2,6)+"."+ext;
+    const r=await fetch(SB_URL+"/storage/v1/object/"+BUCKET+"/"+nom,{method:"POST",headers:{"apikey":SB_KEY,"Authorization":"Bearer "+(ADMIN_TOKEN||SB_KEY),"Content-Type":blob.type||file.type,"x-upsert":"true"},body:blob});
+    if(r.ok)return SB_URL+"/storage/v1/object/public/"+BUCKET+"/"+nom;
+    alert("Error "+r.status+": "+await r.text());
+  }catch(e){alert("Error de conexión al subir la foto.");}
+  return null;
+};
+
+// Producto con variantes: se desliza de lado y cada variante trae su propia info
+function VarCard({p,qtyOf,maxed,add,dec}){
+  const vs=p.variantes;
+  const [i,setI]=useState(0);
+  const [visto,setVisto]=useState(false);
+  const ref=useRef(null);
+  const onScroll=()=>{
+    const el=ref.current;
+    if(!el||!el.clientWidth)return;
+    if(!visto&&el.scrollLeft>8)setVisto(true);
+    const n=Math.max(0,Math.min(vs.length-1,Math.round(el.scrollLeft/el.clientWidth)));
+    if(n!==i)setI(n);
+  };
+  const go=n=>{
+    const el=ref.current;
+    if(!el)return;
+    setVisto(true);
+    const k=Math.max(0,Math.min(vs.length-1,n));
+    el.scrollTo({left:k*el.clientWidth,behavior:"smooth"});
+  };
+  const item=v=>{
+    const st=(v.stock===null||v.stock===undefined||v.stock==="")?undefined:Number(v.stock);
+    return {...p,variantes:undefined,key:p.id+"-"+v.id,variante:v.nombre,nombre:p.nombre+" — "+v.nombre,
+      precio:(v.precio===null||v.precio===undefined||v.precio==="")?p.precio:Number(v.precio),
+      stock:Number.isFinite(st)?st:undefined,imagen_url:v.imagen_url||p.imagen_url,emoji:v.emoji||p.emoji||"✨"};
+  };
+  const flecha=(dir,k)=>(
+    <button onClick={()=>go(k)} aria-label={dir<0?"Anterior":"Siguiente"} style={{position:"absolute",top:"50%",[dir<0?"left":"right"]:8,transform:"translateY(-50%)",width:42,height:42,borderRadius:"50%",border:"2px solid white",background:"rgba(200,144,42,0.92)",color:"white",fontSize:28,fontWeight:700,lineHeight:1,paddingBottom:3,boxShadow:"0 2px 10px rgba(0,0,0,0.35)",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>{dir<0?"‹":"›"}</button>
+  );
+  return(
+    <div style={{background:"white",borderRadius:20,border:"1px solid #e0d8cc",overflow:"hidden"}}>
+      <div style={{padding:"14px 16px 10px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+          <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.3rem"}}>{p.nombre}</div>
+          {vs.length>1&&<SwipeIcon/>}
+        </div>
+        {p.sku&&<div style={{fontSize:11,color:"#9a8f80",letterSpacing:"0.05em",marginTop:2}}>SKU {p.sku}</div>}
+        {p.descripcion&&<div style={{fontSize:13,color:"#7a6e60",marginTop:4,lineHeight:1.5}}>{p.descripcion}</div>}
+      </div>
+      <div ref={ref} className="snap" onScroll={onScroll}>
+        {vs.map((v,k)=>{
+          const it=item(v);
+          const q=qtyOf(it.key);
+          const agotado=it.stock===0;
+          return(
+            <div key={v.id} style={{display:"flex",flexDirection:"column"}}>
+              <div style={{position:"relative",width:"100%",aspectRatio:"4/3",background:it.imagen_url?"url("+it.imagen_url+") center/cover":"#f0ecf5",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"3.5rem",opacity:agotado?0.55:1}}>
+                {!it.imagen_url&&it.emoji}
+                {k===0&&vs.length>1&&!visto&&(
+                  <div style={{position:"absolute",bottom:14,left:"50%",transform:"translateX(-50%)",display:"flex",alignItems:"center",gap:10,padding:"8px 18px",borderRadius:50,background:"rgba(26,21,16,0.78)",color:"white",fontSize:14,fontWeight:500,pointerEvents:"none",boxShadow:"0 2px 12px rgba(0,0,0,0.4)",whiteSpace:"nowrap"}}>
+                    <span className="nudge" style={{display:"inline-block",fontSize:26,lineHeight:1,animation:"manita 1.4s ease-in-out infinite"}}>👆</span>
+                    <span>Desliza para ver más</span>
+                  </div>
+                )}
+                {agotado&&<span style={{position:"absolute",top:10,left:10,background:"#1a1510",color:"white",fontSize:11,padding:"3px 10px",borderRadius:50}}>Agotado</span>}
+                {k>0&&flecha(-1,k-1)}
+                {k<vs.length-1&&flecha(1,k+1)}
+              </div>
+              <div style={{padding:"12px 16px 16px",display:"flex",flexDirection:"column",flex:1}}>
+                <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.15rem",fontWeight:600,marginBottom:4}}>{v.nombre}</div>
+                {v.descripcion&&<div style={{fontSize:13,color:"#7a6e60",marginBottom:10,lineHeight:1.5}}>{v.descripcion}</div>}
+                {it.stock>0&&it.stock<=3&&<div style={{fontSize:11,color:"#c8902a",marginBottom:8}}>⚡ Últimas {it.stock} unidades</div>}
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:"auto",paddingTop:6}}>
+                  <span style={{fontSize:"1.1rem",fontWeight:500,color:"#c8902a"}}>{money(it.precio)}</span>
+                  {q>0
+                    ?<Stepper big q={q} onMinus={()=>dec(it.key)} onPlus={()=>add(it)} maxed={maxed(it)}/>
+                    :<button onClick={()=>add(it)} disabled={agotado} style={{padding:"9px 22px",borderRadius:50,border:"none",background:"#c8902a",color:"white",cursor:agotado?"not-allowed":"pointer",fontSize:13,opacity:agotado?0.4:1}}>Agregar</button>}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {vs.length>1&&(
+        <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:7,padding:"0 0 14px"}}>
+          {vs.map((v,k)=><button key={v.id} onClick={()=>go(k)} aria-label={"Ver "+v.nombre} style={{width:k===i?20:8,height:8,borderRadius:4,border:"none",padding:0,background:k===i?"#c8902a":"#d8d0c2",cursor:"pointer",transition:"all 0.2s"}}/>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── TICKET ── */
+const money=n=>"$"+Number(n||0).toLocaleString("es-MX",{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtFecha=d=>new Date(d).toLocaleString("es-MX",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
+const waMsg=(t,cfg)=>{
+  const lista=t.items.map(p=>"• "+p.nombre+(p.cantidad>1?" x"+p.cantidad:"")+" — "+money(p.precio*p.cantidad)).join("\n");
+  const envio=t.envio==="cobertura"?"🚚 Envío sin costo":"📦 Envío por paquetería";
+  const banco=cfg.clabe?"\n\n💳 Datos de pago:\n"+(cfg.banco||"")+" — CLABE: "+cfg.clabe+"\nTitular: "+(cfg.titular||""):"";
+  return "🌙 *NUEVO PEDIDO — Folio "+t.folio+"*\n\n"+lista+"\n\n💰 Total: "+money(t.total)+"\n"+envio+"\n\n📍 Dirección:\n"+t.dir+"\n\n👤 "+t.nombre+" · 📞 "+t.telefono+banco;
+};
+const copiar=async(txt)=>{
+  try{await navigator.clipboard.writeText(txt);return true;}
+  catch(e){
+    try{const ta=document.createElement("textarea");ta.value=txt;ta.style.position="fixed";ta.style.opacity="0";document.body.appendChild(ta);ta.select();const ok=document.execCommand("copy");document.body.removeChild(ta);return ok;}
+    catch(e2){return false;}
+  }
+};
+function Ticket({t,cfg,onClose,waUrl,waLabel,nota}){
+  const [okKey,setOkKey]=useState("");
+  const cp=async(k,v)=>{if(await copiar(v)){setOkKey(k);setTimeout(()=>setOkKey(""),1600);}};
+  const monto=Number(t.total||0).toFixed(2);
+  const concepto=(cfg&&cfg.concepto)||t.folio;
+  const filaPago=(k,label,val,copyVal)=>(
+    <div key={k} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"5px 0",fontSize:12}}>
+      <div style={{minWidth:0,textAlign:"left"}}>
+        <div style={{color:"#7a6e60",fontSize:10,letterSpacing:"0.06em"}}>{label}</div>
+        <div style={{fontWeight:600,wordBreak:"break-all"}}>{val}</div>
+      </div>
+      <button className="no-print" onClick={()=>cp(k,copyVal)} style={{flexShrink:0,padding:"5px 12px",border:"1.5px solid "+(okKey===k?"#2d7a2d":"#c8902a"),borderRadius:50,background:okKey===k?"rgba(34,139,34,0.08)":"transparent",color:okKey===k?"#2d7a2d":"#c8902a",cursor:"pointer",fontSize:11,fontWeight:500}}>{okKey===k?"✓ Copiado":"Copiar"}</button>
+    </div>
+  );
+  const todo=cfg&&cfg.clabe?[(cfg.banco?"Banco: "+cfg.banco:""),"CLABE: "+cfg.clabe,(cfg.titular?"Titular: "+cfg.titular:""),"Monto: $"+monto,"Concepto: "+concepto].filter(Boolean).join("\n"):"";
+  const sep={borderTop:"1px dashed #b9ad98",margin:"12px 0"};
+  const row={display:"flex",justifyContent:"space-between",gap:12,fontSize:13,padding:"3px 0"};
+  return(
+    <div className="ticket-overlay" style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:700,overflowY:"auto",padding:"20px 12px 40px",display:"flex",flexDirection:"column",alignItems:"center",gap:14}}>
+      <div id="ticket" style={{background:"white",width:"min(100%,360px)",borderRadius:6,padding:"22px 20px",boxShadow:"0 10px 40px rgba(0,0,0,0.35)",color:"#1a1510",fontFamily:"'Jost',sans-serif"}}>
+        <div style={{textAlign:"center"}}>
+          <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:26,fontWeight:600}}>☽ Aether</div>
+          <div style={{fontSize:11,letterSpacing:"0.12em",color:"#7a6e60"}}>RITUALES QUE DESPIERTAN</div>
+        </div>
+        <div style={sep}/>
+        <div style={row}><span style={{color:"#7a6e60"}}>Folio</span><b>{t.folio}</b></div>
+        <div style={{margin:"8px 0 4px"}}><QR texto={t.folio} size={92}/></div>
+        <div style={row}><span style={{color:"#7a6e60"}}>Fecha</span><span>{fmtFecha(t.fecha)}</span></div>
+        <div style={row}><span style={{color:"#7a6e60"}}>Cliente</span><span style={{textAlign:"right"}}>{t.nombre}</span></div>
+        <div style={row}><span style={{color:"#7a6e60"}}>Teléfono</span><span>{t.telefono}</span></div>
+        <div style={{...row,display:"block",paddingTop:6}}><span style={{color:"#7a6e60"}}>Entrega: </span><span>{t.dir}</span></div>
+        <div style={sep}/>
+        {t.items.map((it,i)=>(
+          <div key={i} style={row}>
+            <span>{it.nombre}{it.cantidad>1?" ×"+it.cantidad:""}</span>
+            <span style={{whiteSpace:"nowrap"}}>{money(it.precio*it.cantidad)}</span>
+          </div>
+        ))}
+        <div style={sep}/>
+        <div style={row}><span style={{color:"#7a6e60"}}>Envío</span><span>{t.envio==="cobertura"?"Sin costo":"Paquetería (a confirmar)"}</span></div>
+        <div style={{...row,fontSize:17,fontWeight:600,marginTop:4}}><span>TOTAL</span><span style={{color:"#c8902a"}}>{money(t.total)}</span></div>
+        <div style={sep}/>
+        <div style={{fontSize:12,textAlign:"center",color:"#c8902a",fontWeight:600,marginBottom:6}}>PAGO PENDIENTE</div>
+        {cfg&&cfg.clabe?(
+          <div>
+            {cfg.banco&&filaPago("banco","BANCO",cfg.banco,cfg.banco)}
+            {filaPago("clabe","CLABE",cfg.clabe,cfg.clabe)}
+            {cfg.titular&&filaPago("titular","TITULAR",cfg.titular,cfg.titular)}
+            {filaPago("monto","MONTO A TRANSFERIR",money(t.total),monto)}
+            {filaPago("concepto","CONCEPTO",concepto,concepto)}
+            <button className="no-print" onClick={()=>cp("todo",todo)} style={{width:"100%",marginTop:8,padding:"8px 0",border:"none",borderRadius:50,background:okKey==="todo"?"#2d7a2d":"#1a1510",color:"white",cursor:"pointer",fontSize:12,fontWeight:500}}>{okKey==="todo"?"✓ Datos copiados":"Copiar todos los datos de pago"}</button>
+          </div>
+        ):<div style={{fontSize:12,textAlign:"center",color:"#7a6e60"}}>Te enviaremos los datos de pago por WhatsApp.</div>}
+        <div style={sep}/>
+        <div style={{fontSize:11,textAlign:"center",color:"#7a6e60",lineHeight:1.6}}>Envía tu comprobante de pago por WhatsApp.<br/>¡Gracias por tu compra! ☽</div>
+      </div>
+      <div className="no-print" style={{width:"min(100%,360px)",display:"flex",flexDirection:"column",gap:10}}>
+        {nota&&<div style={{color:"rgba(255,255,255,0.9)",fontSize:12,textAlign:"center",lineHeight:1.5}}>{nota}</div>}
+        {waUrl&&<a href={waUrl} target="_blank" rel="noopener noreferrer" style={{...B("#25D366"),display:"block",textAlign:"center",textDecoration:"none"}}>{waLabel||"Enviar por WhatsApp 📲"}</a>}
+        <button onClick={()=>window.print()} style={B("#c8902a")}>🖨 Imprimir / Guardar PDF</button>
+        <button onClick={onClose} style={B("transparent",{border:"1.5px solid rgba(255,255,255,0.6)"})}>Cerrar</button>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════
+   TIENDA
+══════════════════════════════════════════════ */
+function Tienda(){
+  const [prods,setProds]=useState([]);
+  const [cfg,setCfg]=useState({});
+  const [filtro,setFiltro]=useState("Todos");
+  const [busq,setBusq]=useState("");
+  const [carrito,setCarrito]=useState([]);
+  const [drawer,setDrawer]=useState(false);
+  const [addr,setAddr]=useState({nombre:"",telefono:"",calle:"",colonia:"",cp:"",alcaldia:"",refs:""});
+  const [cpSt,setCpSt]=useState(null);
+  const [zmap,setZmap]=useState(CP_ZONA);
+  const [ticket,setTicket]=useState(null);
+  const [sess,setSess]=useState(null);
+  const [authOpen,setAuthOpen]=useState(false);
+  const [misOpen,setMisOpen]=useState(false);
+  const [rolInfo,setRolInfo]=useState({uid:null,rol:null});
+  const [recov,setRecov]=useState(null);
+  const [toast,setToast]=useState("");
+  const [loading,setLoading]=useState(true);
+  const [enviando,setEnviando]=useState(false);
+  const [faqOpen,setFaqOpen]=useState(false);
+  const [faqIdx,setFaqIdx]=useState(null);
+
+  const toast2=msg=>{setToast(msg);setTimeout(()=>setToast(""),2500);};
+
+  useEffect(()=>{
+    (async()=>{
+      try{
+        const [p,c,z]=await Promise.all([
+          db("productos","?select=*&activo=eq.true&order=id.asc"),
+          db("config","?select=clave,valor"),
+          db("zonas_cp","?select=*").catch(()=>[]),
+        ]);
+        setZmap(mapaCP(z));
+        setProds(Array.isArray(p)?p:[]);
+        if(Array.isArray(c)){const m={};c.forEach(r=>m[r.clave]=r.valor);setCfg(m);}
+      }catch(e){}
+      setLoading(false);
+    })();
+  },[]);
+
+  useEffect(()=>{
+    (async()=>{
+      try{
+        const h=window.location.hash||"";
+        if(h.includes("error_description")){
+          history.replaceState(null,"",window.location.pathname+window.location.search);
+          toast2("⚠️ El enlace del correo expiró. Solicita otro.");
+        }else if(h.includes("access_token")){
+          const q=new URLSearchParams(h.replace(/^#/,""));
+          const at=q.get("access_token"),rt=q.get("refresh_token"),type=q.get("type");
+          history.replaceState(null,"",window.location.pathname+window.location.search);
+          const u=await authFetch("user",null,"GET",at);
+          if(u.ok){
+            const n={access_token:at,refresh_token:rt,expires_at:Math.floor(Date.now()/1000)+(Number(q.get("expires_in"))||3600),user:u.data};
+            if(type==="recovery"){setRecov(n);return;}
+            saveSess(n);setSess(n);toast2("✅ Cuenta confirmada, ¡bienvenida!");return;
+          }
+        }
+        const sv=await validSess();
+        if(sv)setSess(sv);
+      }catch(e){}
+    })();
+  },[]);
+
+  useEffect(()=>{
+    if(!sess)return;
+    const m=(sess.user&&sess.user.user_metadata)||{};
+    setAddr(a=>({...a,nombre:a.nombre||m.nombre||"",telefono:a.telefono||m.telefono||""}));
+  },[sess]);
+
+  const uid=sess&&sess.user&&sess.user.id;
+  // undefined = todavía consultando el rol; null = cliente normal
+  const rol=!sess?null:(rolInfo.uid===uid?rolInfo.rol:undefined);
+  useEffect(()=>{
+    if(!uid)return;
+    let vivo=true;
+    validSess()
+      .then(sv=>obtenerRol(sv?sv.access_token:sess.access_token,uid))
+      .then(r=>{if(vivo)setRolInfo({uid,rol:r});})
+      .catch(()=>{if(vivo)setRolInfo({uid,rol:null});});
+    return()=>{vivo=false;};
+  },[uid]);
+
+  const cerrarSesion=async()=>{
+    const sv=loadSess();
+    if(sv)authFetch("logout",null,"POST",sv.access_token).catch(()=>{});
+    saveSess(null);setSess(null);setMisOpen(false);toast2("Sesión cerrada");
+  };
+
+  const cats=["Todos",...CATS.filter(c=>prods.some(p=>p.categoria===c))];
+  const vis=prods.filter(p=>(filtro==="Todos"||p.categoria===filtro)&&(!busq||p.nombre.toLowerCase().includes(busq.toLowerCase())));
+  const total=carrito.reduce((s,p)=>s+p.precio*p.qty,0);
+  const piezas=carrito.reduce((s,p)=>s+p.qty,0);
+  const qtyOf=k=>(carrito.find(c=>kOf(c)===k)||{qty:0}).qty;
+  const maxed=p=>typeof p.stock==="number"&&qtyOf(kOf(p))>=p.stock;
+  const add=p=>{
+    if(maxed(p)){toast2("Solo hay "+p.stock+" en stock");return;}
+    const k=kOf(p);
+    setCarrito(pr=>pr.some(c=>kOf(c)===k)?pr.map(c=>kOf(c)===k?{...c,qty:c.qty+1}:c):[...pr,{...p,qty:1}]);
+    toast2("✦ "+p.nombre+" añadido");
+  };
+  const dec=k=>setCarrito(pr=>pr.flatMap(c=>kOf(c)===k?(c.qty>1?[{...c,qty:c.qty-1}]:[]):[c]));
+  const rm=k=>setCarrito(pr=>pr.filter(c=>kOf(c)!==k));
+  const verCP=cp=>{
+    setAddr(a=>({...a,cp,alcaldia:zmap[cp]||""}));
+    if(cp.length===5)setCpSt(zmap[cp]?"in":"out");
+    else setCpSt(null);
+  };
+
+  const confirmar=async()=>{
+    if(!carrito.length)return;
+    if(!addr.nombre||!addr.telefono||!addr.calle||!addr.cp){toast2("⚠️ Completa nombre, teléfono, calle y CP");return;}
+    setEnviando(true);
+    try{
+      const f=folio();
+      const base={folio:f,cliente_nombre:addr.nombre,cliente_telefono:addr.telefono,cliente_calle:addr.calle,cliente_colonia:addr.colonia,cliente_cp:addr.cp,cliente_alcaldia:addr.alcaldia,cliente_referencias:addr.refs,total,tipo_envio:cpSt==="in"?"cobertura":"paqueteria",status:"nuevo"};
+      let tk=null;
+      if(sess){tk=await validSess();}
+      const filas=carrito.map(p=>({producto_id:p.id,nombre:p.nombre,precio:p.precio,cantidad:p.qty}));
+      // todos los pedidos se registran con una función segura; si hay sesión, queda ligado a la cuenta
+      const rr=await fetch(SB_URL+"/rest/v1/rpc/crear_pedido",{method:"POST",headers:{"apikey":SB_KEY,"Authorization":"Bearer "+(tk?tk.access_token:SB_KEY),"Content-Type":"application/json"},body:JSON.stringify({p_pedido:base,p_items:filas})});
+      if(!rr.ok){const ej=await rr.json().catch(()=>({}));throw new Error(ej.message||"rpc");}
+      const dir=addr.calle+", Col. "+addr.colonia+", CP "+addr.cp+(addr.alcaldia?", "+addr.alcaldia:"")+(addr.refs?" ("+addr.refs+")":"");
+      setTicket({folio:f,fecha:new Date().toISOString(),nombre:addr.nombre,telefono:addr.telefono,dir,items:carrito.map(p=>({nombre:p.nombre,precio:p.precio,cantidad:p.qty})),total,envio:cpSt==="in"?"cobertura":"paqueteria"});
+      setCarrito([]);setAddr({nombre:"",telefono:"",calle:"",colonia:"",cp:"",alcaldia:"",refs:""});setCpSt(null);setDrawer(false);
+      toast2("✅ Pedido "+f+" creado");
+    }catch(e){toast2("Error al crear pedido"+(e&&e.message&&e.message!=="rpc"?": "+e.message:""));}
+    setEnviando(false);
+  };
+
+  if(sess&&rol===undefined)return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Cormorant Garamond',serif",fontSize:"1.5rem",color:"#c8902a"}}>☽ Cargando…</div>;
+  if(sess&&rol==="admin")return <AdminGate sess={sess} onSalir={cerrarSesion}/>;
+  if(sess&&(rol==="surtidor"||rol==="embarques"))return <Operacion rol={rol} sess={sess} onLogout={cerrarSesion}/>;
+  if(loading)return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Cormorant Garamond',serif",fontSize:"1.5rem",color:"#c8902a"}}>☽ Cargando…</div>;
+
+  return(
+    <div style={{fontFamily:"'Jost',sans-serif",background:"#faf7f2",minHeight:"100vh"}}>
+      {/* NAV */}
+      <nav style={{position:"sticky",top:0,zIndex:100,background:"rgba(250,247,242,0.95)",backdropFilter:"blur(12px)",borderBottom:"1px solid #e0d8cc",padding:"0 20px",height:60,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:22,fontWeight:600}}><span style={{color:"#c8902a"}}>☽</span> Aether<span style={{color:"#c8902a"}}>.</span></div>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+        <button onClick={()=>sess?setMisOpen(true):setAuthOpen(true)} style={{padding:"7px 13px",border:"1.5px solid #1a1510",borderRadius:50,background:sess?"#1a1510":"transparent",color:sess?"#faf7f2":"#1a1510",cursor:"pointer",fontSize:13,whiteSpace:"nowrap"}}>{sess?"📦 Mis pedidos":"👤 Entrar"}</button>
+        <button onClick={()=>setDrawer(true)} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 16px",border:"1.5px solid #1a1510",borderRadius:50,background:"transparent",cursor:"pointer",fontSize:13,position:"relative"}}>
+          🛍 Carrito
+          {piezas>0&&<span style={{position:"absolute",top:-6,right:-6,minWidth:18,height:18,padding:"0 4px",background:"#c8902a",color:"white",borderRadius:9,fontSize:10,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700}}>{piezas}</span>}
+        </button>
+        </div>
+      </nav>
+
+      {/* HERO */}
+      <div style={{background:"#1a1208",padding:"70px 20px 60px",textAlign:"center",position:"relative",overflow:"hidden"}}>
+        <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 60% 50% at 40% 50%, rgba(200,144,42,0.15), transparent)"}}/>
+        <div style={{position:"relative",zIndex:1}}>
+          <div style={{display:"inline-flex",alignItems:"center",gap:8,padding:"6px 18px",border:"1px solid rgba(200,144,42,0.35)",borderRadius:50,color:"rgba(240,220,180,0.8)",fontSize:12,marginBottom:24}}>✦ Energía consagrada · Envío en zona seleccionada</div>
+          <h1 style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"clamp(2.4rem,8vw,4rem)",fontWeight:300,color:"#f0e8d4",lineHeight:1.1,marginBottom:8}}>Rituales que<br/><em style={{color:"#e0aa4a"}}>despiertan</em></h1>
+          <p style={{color:"rgba(240,220,180,0.55)",fontSize:14,maxWidth:320,margin:"20px auto 0",lineHeight:1.7}}>Velas, cuarzos, inciensos y herramientas místicas elegidas a mano.</p>
+        </div>
+      </div>
+
+      {/* CATÁLOGO */}
+      <div style={{maxWidth:480,margin:"0 auto",padding:"40px 16px 100px"}}>
+        <h2 style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"2rem",fontWeight:400,marginBottom:20}}>Catálogo</h2>
+        <div style={{position:"relative",marginBottom:18}}>
+          <span style={{position:"absolute",left:14,top:"50%",transform:"translateY(-50%)"}}>🔍</span>
+          <input value={busq} onChange={e=>setBusq(e.target.value)} placeholder="Buscar producto…" style={{...I(),padding:"12px 14px 12px 40px",borderRadius:50}}/>
+        </div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:28}}>
+          {cats.map(c=><button key={c} onClick={()=>setFiltro(c)} style={{padding:"7px 16px",borderRadius:50,border:"1.5px solid "+(filtro===c?"#c8902a":"#e0d8cc"),background:filtro===c?"#c8902a":"white",color:filtro===c?"white":"#2e2416",cursor:"pointer",fontSize:13}}>{c}</button>)}
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:16}}>
+          {vis.length===0&&<div style={{textAlign:"center",padding:60,color:"#7a6e60"}}>🌙 Sin productos</div>}
+          {vis.map(p=>(Array.isArray(p.variantes)&&p.variantes.length>0)?<VarCard key={p.id} p={p} qtyOf={qtyOf} maxed={maxed} add={add} dec={dec}/>:(
+            <div key={p.id} style={{background:"white",borderRadius:20,border:"1px solid #e0d8cc",overflow:"hidden"}}>
+              <div style={{width:"100%",aspectRatio:"4/3",background:p.imagen_url?"url("+p.imagen_url+") center/cover":"#f0ecf5",backgroundSize:"cover",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"3.5rem"}}>{!p.imagen_url&&(p.emoji||"✨")}</div>
+              <div style={{padding:"14px 16px 16px"}}>
+                <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.3rem",marginBottom:4}}>{p.nombre}</div>
+                {p.sku&&<div style={{fontSize:11,color:"#9a8f80",letterSpacing:"0.05em",marginBottom:6}}>SKU {p.sku}</div>}
+                <div style={{fontSize:13,color:"#7a6e60",marginBottom:12,lineHeight:1.5}}>{p.descripcion}</div>
+                {p.stock<=3&&p.stock>0&&<div style={{fontSize:11,color:"#c8902a",marginBottom:8}}>⚡ Últimas {p.stock} unidades</div>}
+                {p.stock===0&&<div style={{fontSize:11,color:"#999",marginBottom:8}}>Sin stock</div>}
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                  <span style={{fontSize:"1.1rem",fontWeight:500,color:"#c8902a"}}>${p.precio}.00</span>
+                  {qtyOf(kOf(p))>0
+                    ?<Stepper big q={qtyOf(kOf(p))} onMinus={()=>dec(kOf(p))} onPlus={()=>add(p)} maxed={maxed(p)}/>
+                    :<button onClick={()=>add(p)} disabled={p.stock===0} style={{padding:"9px 22px",borderRadius:50,border:"none",background:"#c8902a",color:"white",cursor:p.stock===0?"not-allowed":"pointer",fontSize:13,opacity:p.stock===0?0.4:1}}>Agregar</button>}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* DRAWER */}
+      {drawer&&<div onClick={()=>setDrawer(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.4)",zIndex:200}}/>}
+      <div style={{position:"fixed",right:0,top:0,bottom:0,width:"min(92vw,390px)",background:"#faf7f2",zIndex:201,transform:drawer?"translateX(0)":"translateX(100%)",transition:"transform 0.35s cubic-bezier(0.4,0,0.2,1)",display:"flex",flexDirection:"column",boxShadow:"-20px 0 60px rgba(0,0,0,0.15)"}}>
+        <div style={{padding:"18px 20px 14px",borderBottom:"1px solid #e0d8cc",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <span style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.4rem",fontWeight:600}}>☽ Tu Carrito</span>
+          <button onClick={()=>setDrawer(false)} style={{width:34,height:34,border:"1.5px solid #e0d8cc",borderRadius:"50%",background:"transparent",cursor:"pointer",fontSize:14,color:"#7a6e60"}}>✕</button>
+        </div>
+        <div style={{flex:1,overflowY:"auto",padding:"14px 20px"}}>
+          {carrito.length===0
+            ?<div style={{textAlign:"center",padding:"50px 0",color:"#7a6e60"}}>🌙 Tu carrito está vacío</div>
+            :carrito.map(p=>(
+              <div key={kOf(p)} style={{display:"flex",gap:12,alignItems:"center",padding:"10px 0",borderBottom:"1px solid #e0d8cc"}}>
+                <div style={{width:48,height:48,background:p.imagen_url?"url("+p.imagen_url+") center/cover":"#f0ecf5",backgroundSize:"cover",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"1.3rem",flexShrink:0}}>{!p.imagen_url&&p.emoji}</div>
+                <div style={{flex:1}}>
+                  <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:15,fontWeight:600}}>{p.nombre}</div>
+                  <div style={{fontSize:12,color:"#c8902a",marginBottom:6}}>${p.precio} c/u · <b>${p.precio*p.qty}</b></div>
+                  <Stepper q={p.qty} onMinus={()=>dec(kOf(p))} onPlus={()=>add(p)} maxed={maxed(p)}/>
+                </div>
+                <button onClick={()=>rm(kOf(p))} aria-label="Quitar producto"  style={{background:"none",border:"none",cursor:"pointer",color:"#bbb",fontSize:14}}>✕</button>
+              </div>
+            ))
+          }
+          {carrito.length>0&&(
+            <div style={{marginTop:20}}>
+              <div style={{fontSize:11,color:"#7a6e60",letterSpacing:"0.06em",marginBottom:10}}>👤 TUS DATOS</div>
+              {[{k:"nombre",ph:"Nombre completo"},{k:"telefono",ph:"Teléfono"}].map(f=>(
+                <input key={f.k} value={addr[f.k]} onChange={e=>setAddr(a=>({...a,[f.k]:e.target.value}))} placeholder={f.ph} style={{...I(),marginBottom:8}}/>
+              ))}
+              <div style={{fontSize:11,color:"#7a6e60",letterSpacing:"0.06em",margin:"12px 0 10px"}}>📍 DIRECCIÓN DE ENTREGA</div>
+              {[{k:"calle",ph:"Calle y número"},{k:"colonia",ph:"Colonia"}].map(f=>(
+                <input key={f.k} value={addr[f.k]} onChange={e=>setAddr(a=>({...a,[f.k]:e.target.value}))} placeholder={f.ph} style={{...I(),marginBottom:8}}/>
+              ))}
+              <div style={{display:"flex",gap:8,marginBottom:8}}>
+                <input value={addr.cp} onChange={e=>{const v=e.target.value.replace(/\D/g,"").slice(0,5);verCP(v);}} placeholder="Código postal" maxLength={5} style={{...I(),flex:1,border:"1.5px solid "+(cpSt==="in"?"#2d7a2d":cpSt==="out"?"#c8902a":"#e0d8cc")}}/>
+                <input value={addr.alcaldia} readOnly placeholder="Alcaldía" style={{...I(),flex:1,background:"#f5f0e8",color:"#7a6e60"}}/>
+              </div>
+              <input value={addr.refs} onChange={e=>setAddr(a=>({...a,refs:e.target.value}))} placeholder="Referencias" style={{...I()}}/>
+              {cpSt==="in"&&<div style={{marginTop:8,padding:"8px 12px",background:"rgba(34,139,34,0.08)",border:"1px solid rgba(34,139,34,0.2)",borderRadius:10,fontSize:12,color:"#2d7a2d"}}>✅ Zona con cobertura — Envío sin costo</div>}
+              {cpSt==="out"&&<div style={{marginTop:8,padding:"8px 12px",background:"rgba(200,144,42,0.08)",border:"1px solid rgba(200,144,42,0.25)",borderRadius:10,fontSize:12,color:"#8a6010"}}>📦 Fuera de zona — Envío por paquetería</div>}
+            </div>
+          )}
+        </div>
+        <div style={{padding:"14px 20px 20px",borderTop:"1px solid #e0d8cc"}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:14,fontSize:14}}>
+            <span style={{color:"#7a6e60"}}>Total</span>
+            <span style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.3rem",fontWeight:600}}>${total}</span>
+          </div>
+          <button onClick={confirmar} disabled={!carrito.length||enviando} style={{...B(),opacity:carrito.length&&!enviando?1:0.5,cursor:carrito.length&&!enviando?"pointer":"not-allowed"}}>
+            {enviando?"Enviando…":"Confirmar pedido 📲"}
+          </button>
+        </div>
+      </div>
+
+      {/* FAQ */}
+      <button onClick={()=>{setFaqOpen(o=>!o);setFaqIdx(null);}} style={{position:"fixed",bottom:20,right:20,width:50,height:50,background:faqOpen?"#1a1510":"#c8902a",border:"none",borderRadius:"50%",cursor:"pointer",zIndex:400,fontSize:20,boxShadow:"0 4px 20px rgba(0,0,0,0.25)",transition:"all 0.2s"}}>
+        {faqOpen?"✕":"💬"}
+      </button>
+      {faqOpen&&(
+        <div style={{position:"fixed",bottom:82,right:16,width:"min(92vw,330px)",background:"#faf7f2",borderRadius:20,zIndex:399,boxShadow:"0 12px 50px rgba(0,0,0,0.2)",border:"1px solid #e0d8cc",overflow:"hidden",maxHeight:"65vh",display:"flex",flexDirection:"column"}}>
+          <div style={{background:"#1a1510",padding:"14px 18px"}}><div style={{fontFamily:"'Cormorant Garamond',serif",color:"#f0e8d4",fontSize:15,fontWeight:600}}>☽ Preguntas frecuentes</div></div>
+          <div style={{flex:1,overflowY:"auto",padding:"12px 14px"}}>
+            {FAQS.map((f,i)=>(
+              <div key={i} style={{marginBottom:8}}>
+                <button onClick={()=>setFaqIdx(faqIdx===i?null:i)} style={{width:"100%",textAlign:"left",padding:"10px 14px",background:faqIdx===i?"#1a1510":"white",color:faqIdx===i?"#f0e8d4":"#2e2416",border:"1.5px solid "+(faqIdx===i?"#c8902a":"#e0d8cc"),borderRadius:faqIdx===i?"12px 12px 0 0":12,cursor:"pointer",fontSize:13,fontWeight:500,display:"flex",justifyContent:"space-between"}}>
+                  {f.q}<span style={{color:"#c8902a"}}>{faqIdx===i?"−":"+"}</span>
+                </button>
+                {faqIdx===i&&<div style={{padding:"10px 14px",background:"#f5f0e8",border:"1.5px solid #c8902a",borderTop:"none",borderRadius:"0 0 12px 12px",fontSize:13,lineHeight:1.6}}>{f.a}</div>}
+              </div>
+            ))}
+            <div style={{margin:"8px 0 4px",padding:"12px 14px",background:"rgba(200,144,42,0.07)",border:"1px solid rgba(200,144,42,0.25)",borderRadius:12,textAlign:"center"}}>
+              <div style={{fontSize:12,color:"#7a6e60",marginBottom:6}}>¿No encontraste tu respuesta?</div>
+              <a href="https://wa.me/525648229075" target="_blank" rel="noopener noreferrer" style={{color:"#c8902a",fontWeight:700,fontSize:15,textDecoration:"none"}}>📱 5648229075</a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {authOpen&&<AuthModal onClose={()=>setAuthOpen(false)} onSession={n=>{setSess(n);setAuthOpen(false);toast2("✅ Sesión iniciada");}}/>}
+      {misOpen&&sess&&<MisPedidos sess={sess} cfg={cfg} onClose={()=>setMisOpen(false)} onLogout={cerrarSesion}/>}
+      {recov&&<RecoverModal sess={recov} onClose={()=>setRecov(null)} onDone={n=>{setSess(n);setRecov(null);toast2("✅ Contraseña actualizada");}}/>}
+      {ticket&&<Ticket nota={sess?"Sigue el status de tu pedido en 📦 Mis pedidos.":"Crea tu cuenta (👤 Entrar) para seguir el status de tus próximos pedidos."} t={ticket} cfg={cfg} onClose={()=>setTicket(null)} waLabel="Enviar pedido por WhatsApp 📲" waUrl={"https://wa.me/"+(cfg.whatsapp||"525648229075")+"?text="+encodeURIComponent(waMsg(ticket,cfg))}/>}
+      <button onClick={()=>sess?toast2("Tu cuenta no es de administrador. Cierra sesión y entra con la cuenta Admin."):setAuthOpen(true)} title="Acceso administrador" style={{position:"fixed",bottom:20,left:20,width:32,height:32,background:"rgba(0,0,0,0.1)",border:"none",borderRadius:"50%",cursor:"pointer",fontSize:13,color:"rgba(0,0,0,0.2)",zIndex:50}}>⚙</button>
+      {toast&&<Toast msg={toast}/>}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════
+   ADMIN
+══════════════════════════════════════════════ */
+function AdminGate({sess,onSalir}){
+  const [listo,setListo]=useState(false);
+  useEffect(()=>{
+    ADMIN_TOKEN=sess.access_token;setListo(true);
+    // renueva el token cada 5 min para que no caduque a media sesión
+    const t=setInterval(async()=>{const sv=await validSess();if(sv)ADMIN_TOKEN=sv.access_token;},300000);
+    return()=>{clearInterval(t);ADMIN_TOKEN=null;};
+  },[]);
+  return listo?<Admin onSalir={onSalir}/>:null;
+}
+
+function Admin({onSalir}){
+  const [sec,setSec]=useState("pedidos");
+  const [pedidos,setPedidos]=useState([]);
+  const [prods,setProds]=useState([]);
+  const [cfg,setCfg]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [toast,setToast]=useState("");
+  const [detalle,setDetalle]=useState(null);
+  const [editP,setEditP]=useState(null);
+  const [filtroSt,setFiltroSt]=useState("todos");
+  const [fFecha,setFFecha]=useState("todos");
+  const [busqF,setBusqF]=useState("");
+  const [scan,setScan]=useState(false);
+  const t=msg=>{setToast(msg);setTimeout(()=>setToast(""),2500);};
+
+  useEffect(()=>{
+    (async()=>{
+      try{
+        const [pe,pr,c]=await Promise.all([
+          db("pedidos","?select=*&order=created_at.desc"),
+          db("productos","?select=*&order=id.asc"),
+          db("config","?select=*"),
+        ]);
+        setPedidos(Array.isArray(pe)?pe:[]);
+        setProds(Array.isArray(pr)?pr:[]);
+        setCfg(Array.isArray(c)?c:[]);
+      }catch(e){}
+      setLoading(false);
+    })();
+  },[]);
+
+  const hoy=new Date().toISOString().slice(0,10);
+  const hoyP=pedidos.filter(p=>p.created_at?.slice(0,10)===hoy);
+  const ventasH=hoyP.filter(p=>p.status!=="cancelado").reduce((s,p)=>s+Number(p.total),0);
+  const nuevos=pedidos.filter(p=>p.status==="nuevo").length;
+
+  const cambSt=async(id,status)=>{
+    await dbw("pedidos","PATCH",{status},"?id=eq."+id);
+    setPedidos(pr=>pr.map(p=>p.id===id?{...p,status}:p));
+    if(detalle?.id===id)setDetalle(pr=>({...pr,status}));
+    t("✦ Status actualizado");
+  };
+
+  const guardarP=async(form)=>{
+    const vs=form.variantes||[];
+    if(vs.some(v=>!String(v.nombre||"").trim())){alert("Cada variante necesita un nombre.");return;}
+    const incluyeVar=vs.length>0||("variantes" in form);
+    const colsSku=form.id?("sku" in form):true;
+    let sku=form.sku||null;
+    if(colsSku&&!sku){
+      const mat=String(form.material||"").trim();
+      if(!form.id&&!mat){alert("Escribe el material del producto (ej. Parafina) para generar su SKU.");return;}
+      if(mat){
+        const nuevo=await siguienteSku(prefijoSku(form.categoria,mat));
+        if(!nuevo)return;
+        sku=nuevo;
+      }
+    }
+    const d={nombre:form.nombre,descripcion:form.descripcion,precio:Number(form.precio),stock:vs.length?vs.reduce((a,v)=>a+(Number(v.stock)||0),0):Number(form.stock),categoria:form.categoria,emoji:form.emoji||"✨",activo:form.activo,imagen_url:form.imagen_url||null};
+    if(colsSku){d.material=String(form.material||"").trim()||null;if(sku)d.sku=sku;}
+    if(incluyeVar)d.variantes=vs.map(v=>({id:v.id,nombre:String(v.nombre).trim(),descripcion:v.descripcion||"",precio:(v.precio===""||v.precio===null||v.precio===undefined)?null:Number(v.precio),stock:Number(v.stock)||0,emoji:v.emoji||"",imagen_url:v.imagen_url||null}));
+    let r;
+    if(form.id)r=await dbw("productos","PATCH",d,"?id=eq."+form.id);
+    else r=await dbw("productos","POST",d);
+    if(r&&!Array.isArray(r)&&(r.message||r.code)){
+      const falta=String(r.message||"").toLowerCase().includes("variantes");
+      alert("No se pudo guardar: "+(r.message||r.code)+(falta?"\n\nFalta crear la columna 'variantes' en Supabase. Abre SQL Editor y ejecuta:\nalter table productos add column if not exists variantes jsonb not null default '[]'::jsonb;":""));
+      return;
+    }
+    if(form.id)setProds(pr=>pr.map(p=>p.id===form.id?{...p,...d}:p));
+    else if(Array.isArray(r)&&r[0])setProds(pr=>[...pr,r[0]]);
+    setEditP(null);t("✦ Producto guardado");
+  };
+
+  const elimP=async(id)=>{
+    await dbdel("productos","?id=eq."+id);
+    setProds(pr=>pr.filter(p=>p.id!==id));
+    setEditP(null);t("Producto eliminado");
+  };
+
+  const guardarCfg=async(items)=>{
+    await Promise.all(items.map(i=>dbw("config","PATCH",{valor:i.valor},"?clave=eq."+i.clave)));
+    setCfg(items);t("✦ Config guardada");
+  };
+
+  // filtros: estado + periodo (para entregados cuenta la fecha de entrega) y buscador por folio, nombre o teléfono
+  const iniPeriodo=f=>{
+    const d=new Date();d.setHours(0,0,0,0);
+    if(f==="hoy")return d;
+    if(f==="semana"){d.setDate(d.getDate()-((d.getDay()+6)%7));return d;}
+    if(f==="mes"){d.setDate(1);return d;}
+    return null;
+  };
+  const fechaPed=p=>new Date(p.status==="entregado"&&p.entregado_en?p.entregado_en:p.created_at);
+  const qBusq=busqF.trim().toLowerCase();
+  const ini=iniPeriodo(fFecha);
+  const pedF=qBusq
+    ?pedidos.filter(p=>String(p.folio||"").toLowerCase().includes(qBusq)||String(p.cliente_nombre||"").toLowerCase().includes(qBusq)||String(p.cliente_telefono||"").includes(qBusq))
+    :pedidos.filter(p=>(filtroSt==="todos"||p.status===filtroSt)&&(!ini||fechaPed(p)>=ini));
+
+  if(loading)return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}><Spin/></div>;
+
+  return(
+    <div style={{fontFamily:"'Jost',sans-serif",background:"#f5f0e8",minHeight:"100vh"}}>
+      <div style={{background:"#1a1510",padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:20,color:"#f0e8d4",fontWeight:600}}>☽ Aether <span style={{color:"#c8902a",fontSize:13,fontWeight:400}}>Admin</span></div>
+        <button onClick={onSalir} style={{fontSize:12,color:"rgba(240,220,180,0.6)",background:"none",border:"1px solid rgba(240,220,180,0.2)",borderRadius:50,padding:"5px 14px",cursor:"pointer"}}>Cerrar sesión</button>
+      </div>
+
+      {/* STATS */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,padding:"16px",maxWidth:480,margin:"0 auto"}}>
+        {[{l:"Pedidos hoy",v:hoyP.length,i:"📦"},{l:"Ventas hoy",v:"$"+ventasH,i:"💰"},{l:"Sin confirmar",v:nuevos,i:"🆕"}].map(s=>(
+          <div key={s.l} style={{background:"white",borderRadius:14,padding:"12px 10px",textAlign:"center",border:"1px solid #e0d8cc"}}>
+            <div style={{fontSize:20,marginBottom:4}}>{s.i}</div>
+            <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.3rem",fontWeight:600}}>{s.v}</div>
+            <div style={{fontSize:11,color:"#7a6e60"}}>{s.l}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* TABS */}
+      <div style={{display:"flex",borderBottom:"2px solid #e0d8cc",background:"white",padding:"0 16px",maxWidth:480,margin:"0 auto"}}>
+        {[["pedidos","📋 Pedidos"],["productos","📦 Productos"],["config","⚙️ Config"]].map(([k,l])=>(
+          <button key={k} onClick={()=>setSec(k)} style={{padding:"13px 14px",border:"none",background:"transparent",cursor:"pointer",fontSize:13,fontWeight:500,color:sec===k?"#c8902a":"#7a6e60",borderBottom:sec===k?"2px solid #c8902a":"2px solid transparent",marginBottom:-2}}>{l}</button>
+        ))}
+      </div>
+
+      <div style={{maxWidth:480,margin:"0 auto",padding:"20px 16px 80px"}}>
+
+        {/* PEDIDOS */}
+        {sec==="pedidos"&&(
+          <>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16}}>
+              {[["todos","Todos"],["nuevo","🆕 Nuevos"],["confirmado","✅ Conf."],["enviado","🚚 Env."],["entregado","🏠 Entr."],["cancelado","❌ Canc."]].map(([k,l])=>(
+                <button key={k} onClick={()=>setFiltroSt(k)} style={{padding:"5px 12px",borderRadius:50,border:"1.5px solid "+(filtroSt===k?"#c8902a":"#e0d8cc"),background:filtroSt===k?"#c8902a":"white",color:filtroSt===k?"white":"#2e2416",cursor:"pointer",fontSize:12}}>{l}</button>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12,alignItems:"center"}}>
+              {[["todos","Todo"],["hoy","Hoy"],["semana","Esta semana"],["mes","Este mes"]].map(([k,l])=>(
+                <button key={k} onClick={()=>{setFFecha(k);setBusqF("");}} disabled={!!qBusq} style={{padding:"5px 12px",borderRadius:50,border:"1.5px solid "+(fFecha===k&&!qBusq?"#1a1510":"#e0d8cc"),background:fFecha===k&&!qBusq?"#1a1510":"white",color:fFecha===k&&!qBusq?"white":"#2e2416",cursor:qBusq?"default":"pointer",fontSize:12,opacity:qBusq?0.45:1}}>{"📅 "+l}</button>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:8,marginBottom:12}}>
+              <input value={busqF} onChange={e=>setBusqF(e.target.value)} placeholder="🔎 Buscar por folio, nombre o teléfono" style={{...I(),flex:1,minWidth:0}}/>
+              <button onClick={()=>setScan(true)} title="Escanear QR del ticket" style={{padding:"0 16px",borderRadius:12,border:"1.5px solid #c8902a",background:"white",cursor:"pointer",fontSize:20}}>📷</button>
+              {busqF&&<button onClick={()=>setBusqF("")} style={{padding:"0 12px",borderRadius:12,border:"1.5px solid #e0d8cc",background:"white",cursor:"pointer",fontSize:14}}>✕</button>}
+            </div>
+            <div style={{fontSize:12,color:"#7a6e60",marginBottom:10}}>{pedF.length} pedido{pedF.length===1?"":"s"}{qBusq?" encontrados (busca en todos los estados y fechas)":""}</div>
+            {scan&&<Escaner onClose={()=>setScan(false)} onFolio={f=>{setScan(false);setBusqF(String(f).trim());}}/>}
+            {pedF.length===0&&<div style={{textAlign:"center",padding:60,color:"#7a6e60"}}>🌙 Sin pedidos</div>}
+            {pedF.map(p=>(
+              <div key={p.id} onClick={()=>setDetalle(p)} style={{background:"white",borderRadius:16,border:"1px solid #e0d8cc",padding:"14px 16px",marginBottom:10,cursor:"pointer"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+                  <div>
+                    <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:17,fontWeight:600}}>{p.folio}</div>
+                    <div style={{fontSize:12,color:"#7a6e60"}}>{p.cliente_nombre} · {p.cliente_telefono}</div>
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:16,fontWeight:600,color:"#c8902a"}}>${p.total}</div>
+                    <span style={{fontSize:11,padding:"2px 8px",borderRadius:50,background:ST_COLORS[p.status]+"22",color:ST_COLORS[p.status]}}>{ST_LABELS[p.status]}</span>
+                  </div>
+                </div>
+                <div style={{fontSize:12,color:"#7a6e60"}}>{p.tipo_envio==="cobertura"?"🚚 Sin costo":"📦 Paquetería"} · {new Date(p.created_at).toLocaleDateString("es-MX",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}{p.user_id?" · 👤 con cuenta":""}</div>
+              </div>
+            ))}
+          </>
+        )}
+
+        {/* PRODUCTOS */}
+        {sec==="productos"&&(
+          <>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+              <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.5rem"}}>Productos</div>
+              <button onClick={()=>setEditP({id:null,nombre:"",descripcion:"",precio:0,stock:0,categoria:CATS[0],emoji:"✨",imagen_url:null,activo:true})} style={{...B("#c8902a",{width:"auto",padding:"8px 16px"})}}>+ Nuevo</button>
+            </div>
+            {prods.map(p=>(
+              <div key={p.id} style={{background:"white",borderRadius:14,border:"1px solid #e0d8cc",padding:"12px 14px",marginBottom:10,display:"flex",gap:12,alignItems:"center"}}>
+                <div style={{width:52,height:52,borderRadius:10,background:p.imagen_url?"url("+p.imagen_url+") center/cover":"#f0ecf5",backgroundSize:"cover",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"1.5rem",flexShrink:0}}>{!p.imagen_url&&p.emoji}</div>
+                <div style={{flex:1}}>
+                  <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:15,fontWeight:600}}>{p.nombre}</div>
+                  <div style={{fontSize:12,color:"#7a6e60",display:"flex",flexWrap:"wrap",gap:8,marginTop:3}}>
+                    {p.sku&&<span style={{fontFamily:"monospace",color:"#5a4e40",background:"#f0ece6",padding:"0 6px",borderRadius:4}}>{p.sku}</span>}
+                    <span style={{color:"#c8902a",fontWeight:500}}>${p.precio}</span>
+                    <span style={{color:p.stock>3?"#2d7a2d":p.stock>0?"#c8902a":"#999"}}>Stock: {p.stock}</span>
+                    {Array.isArray(p.variantes)&&p.variantes.length>0&&<span>🎨 {p.variantes.length} variantes</span>}
+                    {!p.activo&&<span style={{color:"#999"}}>Oculto</span>}
+                  </div>
+                </div>
+                <button onClick={()=>setEditP({...p})} style={{padding:"6px 14px",border:"1.5px solid #e0d8cc",borderRadius:50,background:"transparent",cursor:"pointer",fontSize:12}}>Editar</button>
+              </div>
+            ))}
+          </>
+        )}
+
+        {/* CONFIG */}
+        {sec==="config"&&<><ConfigForm cfg={cfg} onGuardar={guardarCfg}/><ZonasCP/></>}
+      </div>
+
+      {detalle&&<DetallePed ped={detalle} cfg={Object.fromEntries(cfg.map(c=>[c.clave,c.valor]))} onClose={()=>setDetalle(null)} onSt={cambSt}/>}
+      {editP&&<EditorProd prod={editP} onGuardar={guardarP} onClose={()=>setEditP(null)} onElim={elimP}/>}
+      {toast&&<Toast msg={toast}/>}
+    </div>
+  );
+}
+
+/* ── DETALLE PEDIDO ── */
+function DetallePed({ped,cfg,onClose,onSt}){
+  const [items,setItems]=useState([]);
+  const [verTicket,setVerTicket]=useState(false);
+  useEffect(()=>{db("pedido_items","?pedido_id=eq."+ped.id+"&select=*").then(r=>setItems(Array.isArray(r)?r:[]));}, [ped.id]);
+  const notif=()=>{
+    const msgs={confirmado:"✅ Tu pedido ha sido *confirmado*. Te enviamos datos de pago en breve.",enviado:"🚚 Tu pedido está *en camino*. ¡Pronto llegará!",entregado:"🏠 Tu pedido fue *entregado*. ¡Gracias por tu compra en Aether! ☽"};
+    const msg=encodeURIComponent("Hola "+ped.cliente_nombre+" 🌙\n\n"+(msgs[ped.status]||"Tu pedido fue actualizado.")+"\n\nFolio: *"+ped.folio+"*\nTotal: $"+ped.total+"\n\n— Aether ☽");
+    window.open("https://wa.me/52"+ped.cliente_telefono+"?text="+msg,"_blank");
+  };
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:500,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+      <div style={{background:"#faf7f2",borderRadius:"24px 24px 0 0",width:"100%",maxWidth:480,maxHeight:"88vh",overflowY:"auto",padding:"24px 20px 32px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+          <div><div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.4rem",fontWeight:600}}>{ped.folio}</div><div style={{fontSize:12,color:"#7a6e60"}}>{new Date(ped.created_at).toLocaleDateString("es-MX",{dateStyle:"full"})}</div></div>
+          <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:"#7a6e60"}}>✕</button>
+        </div>
+        <div style={{background:"white",borderRadius:14,border:"1px solid #e0d8cc",padding:"14px 16px",marginBottom:14}}>
+          <div style={{fontSize:11,color:"#7a6e60",marginBottom:8}}>👤 CLIENTE</div>
+          <div style={{fontWeight:500}}>{ped.cliente_nombre}</div>
+          <div style={{fontSize:13,color:"#7a6e60"}}>📞 {ped.cliente_telefono}</div>
+          <div style={{fontSize:13,color:"#7a6e60",marginTop:4}}>📍 {ped.cliente_calle}, Col. {ped.cliente_colonia}, CP {ped.cliente_cp}{ped.cliente_alcaldia?", "+ped.cliente_alcaldia:""}</div>
+          {ped.cliente_referencias&&<div style={{fontSize:12,color:"#7a6e60"}}>Refs: {ped.cliente_referencias}</div>}
+          <div style={{marginTop:8,fontSize:12}}>{ped.tipo_envio==="cobertura"?"🚚 Envío sin costo":"📦 Paquetería"}</div>
+        </div>
+        <div style={{background:"white",borderRadius:14,border:"1px solid #e0d8cc",padding:"14px 16px",marginBottom:14}}>
+          <div style={{fontSize:11,color:"#7a6e60",marginBottom:8}}>📦 PRODUCTOS</div>
+          {items.map(it=><div key={it.id} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"6px 0",borderBottom:"1px solid #f0ece6"}}><span>{it.nombre} ×{it.cantidad}</span><span style={{color:"#c8902a",fontWeight:500}}>${it.precio*it.cantidad}</span></div>)}
+          <div style={{display:"flex",justifyContent:"space-between",marginTop:10,fontWeight:600,fontSize:15}}><span>Total</span><span style={{color:"#c8902a"}}>${ped.total}</span></div>
+        </div>
+        <div style={{marginBottom:16}}>
+          <div style={{fontSize:11,color:"#7a6e60",marginBottom:10}}>CAMBIAR STATUS</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+            {Object.entries(ST_LABELS).map(([k,l])=>(
+              <button key={k} onClick={()=>onSt(ped.id,k)} style={{padding:"8px 14px",borderRadius:50,border:"1.5px solid "+(ped.status===k?ST_COLORS[k]:"#e0d8cc"),background:ped.status===k?ST_COLORS[k]+"22":"white",color:ped.status===k?ST_COLORS[k]:"#2e2416",cursor:"pointer",fontSize:12,fontWeight:ped.status===k?600:400}}>{l}</button>
+            ))}
+          </div>
+        </div>
+        {ped.enviado_en&&<div style={{marginBottom:8,padding:"8px 12px",borderRadius:10,background:"rgba(26,111,160,0.08)",color:"#1a6fa0",fontSize:12}}>🚚 Despachado a ruta por embarques · {new Date(ped.enviado_en).toLocaleString("es-MX",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</div>}
+        {ped.confirmado_en&&<div style={{marginBottom:12,padding:"8px 12px",borderRadius:10,background:"rgba(34,139,34,0.08)",color:"#2d7a2d",fontSize:12}}>✅ Confirmado por el surtidor · {new Date(ped.confirmado_en).toLocaleString("es-MX",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</div>}
+        <button onClick={()=>setVerTicket(true)} style={{...B("#c8902a"),marginBottom:10}}>🧾 Ver ticket de venta</button>
+        <button onClick={notif} style={{...B("#25D366")}}>Notificar al cliente por WhatsApp 📲</button>
+      </div>
+      {verTicket&&(()=>{
+        const t={folio:ped.folio,fecha:ped.created_at,nombre:ped.cliente_nombre,telefono:ped.cliente_telefono,dir:ped.cliente_calle+", Col. "+ped.cliente_colonia+", CP "+ped.cliente_cp+(ped.cliente_alcaldia?", "+ped.cliente_alcaldia:"")+(ped.cliente_referencias?" ("+ped.cliente_referencias+")":""),items:items.map(i=>({nombre:i.nombre,precio:i.precio,cantidad:i.cantidad})),total:ped.total,envio:ped.tipo_envio};
+        const txt="Hola "+ped.cliente_nombre+" 🌙\nGracias por tu compra en Aether ☽\n\nFolio: *"+ped.folio+"*\n"+t.items.map(i=>"• "+i.nombre+(i.cantidad>1?" x"+i.cantidad:"")+" — "+money(i.precio*i.cantidad)).join("\n")+"\n\nTotal: *"+money(ped.total)+"*"+(cfg&&cfg.clabe?"\n\n💳 "+(cfg.banco||"")+" — CLABE: "+cfg.clabe+"\nTitular: "+(cfg.titular||""):"");
+        return <Ticket t={t} cfg={cfg} onClose={()=>setVerTicket(false)} waLabel="Enviar ticket al cliente 📲" waUrl={"https://wa.me/52"+ped.cliente_telefono+"?text="+encodeURIComponent(txt)}/>;
+      })()}
+    </div>
+  );
+}
+
+/* ── EDITOR PRODUCTO ── */
+function EditorProd({prod,onGuardar,onClose,onElim}){
+  const [form,setForm]=useState({...prod});
+  const [sub,setSub]=useState(false);
+  const [conf,setConf]=useState(false);
+  const s=(k,v)=>setForm(f=>({...f,[k]:v}));
+  const vars=form.variantes||[];
+  const setVars=a=>s("variantes",a);
+  const [subVar,setSubVar]=useState(-1);
+  const addVar=()=>setVars([...vars,{id:"v"+Date.now().toString(36)+Math.random().toString(36).slice(2,5),nombre:"",descripcion:"",precio:"",stock:10,emoji:"",imagen_url:null}]);
+  const upVar=(i,k,v)=>setVars(vars.map((x,j)=>j===i?{...x,[k]:v}:x));
+  const delVar=i=>setVars(vars.filter((_,j)=>j!==i));
+  const moverVar=(i,d)=>{const j=i+d;if(j<0||j>=vars.length)return;const a=[...vars];[a[i],a[j]]=[a[j],a[i]];setVars(a);};
+  const fotoVar=async(i,e)=>{
+    const file=e.target.files[0];
+    if(!file)return;
+    setSubVar(i);
+    const u=await subirImg(file);
+    if(u)upVar(i,"imagen_url",u);
+    setSubVar(-1);
+  };
+
+  const subirFoto=async(e)=>{
+    const file=e.target.files[0];
+    if(!file)return;
+    setSub(true);
+    try{
+      const ext=file.name.split(".").pop();
+      const nom="prod_"+Date.now()+"."+ext;
+      const r=await fetch(SB_URL+"/storage/v1/object/"+BUCKET+"/"+nom,{
+        method:"POST",
+        headers:{"apikey":SB_KEY,"Authorization":"Bearer "+(ADMIN_TOKEN||SB_KEY),"Content-Type":file.type,"x-upsert":"true"},
+        body:file
+      });
+      if(r.ok)s("imagen_url",SB_URL+"/storage/v1/object/public/"+BUCKET+"/"+nom);
+      else{const err=await r.text();alert("Error "+r.status+": "+err);}
+    }catch(e){alert("Error de conexión.");}
+    setSub(false);
+  };
+
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:500,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+      <div style={{background:"#faf7f2",borderRadius:"24px 24px 0 0",width:"100%",maxWidth:480,maxHeight:"92vh",overflowY:"auto",padding:"24px 20px 32px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+          <h3 style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.4rem"}}>{form.id?"Editar producto":"Nuevo producto"}</h3>
+          <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:"#7a6e60"}}>✕</button>
+        </div>
+
+        {/* FOTO */}
+        <div style={{marginBottom:20,textAlign:"center"}}>
+          <div style={{width:120,height:120,margin:"0 auto 10px",borderRadius:16,background:form.imagen_url?"url("+form.imagen_url+") center/cover":"#f0ecf5",backgroundSize:"cover",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"3rem",border:"2px dashed #e0d8cc",overflow:"hidden"}}>
+            {!form.imagen_url&&(form.emoji||"📷")}
+          </div>
+          <label style={{display:"inline-block",padding:"8px 20px",background:"#c8902a",color:"white",borderRadius:50,fontSize:13,cursor:"pointer",fontWeight:500}}>
+            {sub?"Subiendo…":"📷 "+(form.imagen_url?"Cambiar foto":"Subir foto")}
+            <input type="file" accept="image/*" onChange={subirFoto} style={{display:"none"}} disabled={sub}/>
+          </label>
+          {form.imagen_url&&<button onClick={()=>s("imagen_url",null)} style={{display:"block",margin:"8px auto 0",fontSize:12,color:"#999",background:"none",border:"none",cursor:"pointer",textDecoration:"underline"}}>Quitar foto</button>}
+        </div>
+
+        {[{l:"Nombre",k:"nombre"},{l:"Descripción",k:"descripcion"},{l:"Precio ($)",k:"precio",n:true},{l:"Stock",k:"stock",n:true},{l:"Emoji",k:"emoji"}].map(f=>(
+          <div key={f.k} style={{marginBottom:12}}>
+            <label style={{fontSize:12,color:"#7a6e60",display:"block",marginBottom:4}}>{f.l}</label>
+            <input type={f.n?"number":"text"} value={form[f.k]===0?0:(form[f.k]||"")} onChange={e=>s(f.k,f.n?Number(e.target.value):e.target.value)} style={{...I()}}/>
+          </div>
+        ))}
+
+        <div style={{marginBottom:12}}>
+          <label style={{fontSize:12,color:"#7a6e60",display:"block",marginBottom:4}}>Categoría</label>
+          <select value={form.categoria} onChange={e=>s("categoria",e.target.value)} style={{...I()}}>
+            {CATS.map(c=><option key={c}>{c}</option>)}
+          </select>
+        </div>
+
+        {(!form.id||("sku" in form))&&(
+          <>
+            <div style={{marginBottom:12}}>
+              <label style={{fontSize:12,color:"#7a6e60",display:"block",marginBottom:4}}>Material (se usa para el SKU)</label>
+              <input value={form.material||""} onChange={e=>s("material",e.target.value)} placeholder="Ej. Parafina, Cera de abeja, Cuarzo" style={{...I()}}/>
+            </div>
+            <div style={{marginBottom:14,padding:"10px 12px",borderRadius:10,background:"#f0ece6",fontSize:12,lineHeight:1.6,color:"#5a4e40"}}>
+              {form.sku
+                ?<>SKU asignado: <b style={{fontFamily:"monospace",fontSize:14}}>{form.sku}</b><br/>No cambia aunque edites el producto.</>
+                :String(form.material||"").trim()
+                  ?<>Se asignará al guardar: <b style={{fontFamily:"monospace",fontSize:14}}>{prefijoSku(form.categoria,form.material)}##</b></>
+                  :<>Escribe el material para generar el SKU{form.id?" (opcional en productos que ya existían)":""}.</>}
+            </div>
+          </>
+        )}
+
+        <div style={{background:"white",border:"1px solid #e0d8cc",borderRadius:14,padding:"14px 14px 12px",marginBottom:16}}>
+          <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.15rem",fontWeight:600,marginBottom:2}}>🎨 Variantes (opcional)</div>
+          <div style={{fontSize:12,color:"#7a6e60",lineHeight:1.5,marginBottom:12}}>Si el producto tiene modelos o colores, agrégalos aquí. El cliente los desliza de lado y cada uno muestra su propia foto, info, precio y stock.{vars.length>0?" Con variantes, el stock se maneja por variante.":""}</div>
+          {vars.map((v,i)=>(
+            <div key={v.id} style={{border:"1px solid #e0d8cc",borderRadius:12,padding:12,marginBottom:10,background:"#faf7f2"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                <b style={{fontSize:13}}>Variante {i+1}</b>
+                <div style={{display:"flex",gap:6}}>
+                  <button onClick={()=>moverVar(i,-1)} disabled={i===0} style={{width:30,height:30,border:"1.5px solid #e0d8cc",borderRadius:"50%",background:"white",cursor:i===0?"not-allowed":"pointer",opacity:i===0?0.4:1}}>↑</button>
+                  <button onClick={()=>moverVar(i,1)} disabled={i===vars.length-1} style={{width:30,height:30,border:"1.5px solid #e0d8cc",borderRadius:"50%",background:"white",cursor:i===vars.length-1?"not-allowed":"pointer",opacity:i===vars.length-1?0.4:1}}>↓</button>
+                  <button onClick={()=>delVar(i)} style={{width:30,height:30,border:"1.5px solid #c0392b",borderRadius:"50%",background:"white",color:"#c0392b",cursor:"pointer"}}>✕</button>
+                </div>
+              </div>
+              <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:8}}>
+                <div style={{width:64,height:64,borderRadius:10,flexShrink:0,background:v.imagen_url?"url("+v.imagen_url+") center/cover":"#f0ecf5",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"1.6rem",border:"1.5px dashed #e0d8cc"}}>{!v.imagen_url&&(v.emoji||"📷")}</div>
+                <div>
+                  <label style={{display:"inline-block",padding:"6px 14px",background:"#c8902a",color:"white",borderRadius:50,fontSize:12,cursor:"pointer",fontWeight:500}}>
+                    {subVar===i?"Subiendo…":"📷 "+(v.imagen_url?"Cambiar":"Subir foto")}
+                    <input type="file" accept="image/*" onChange={e=>fotoVar(i,e)} style={{display:"none"}} disabled={subVar===i}/>
+                  </label>
+                  {v.imagen_url&&<button onClick={()=>upVar(i,"imagen_url",null)} style={{display:"block",marginTop:4,fontSize:11,color:"#999",background:"none",border:"none",cursor:"pointer",textDecoration:"underline",padding:0}}>Quitar foto</button>}
+                </div>
+              </div>
+              <input value={v.nombre} onChange={e=>upVar(i,"nombre",e.target.value)} placeholder="Nombre (ej. Rojo, Blanca)" style={{...I(),marginBottom:8}}/>
+              <input value={v.descripcion||""} onChange={e=>upVar(i,"descripcion",e.target.value)} placeholder="Descripción de esta variante" style={{...I(),marginBottom:8}}/>
+              <div style={{display:"flex",gap:8}}>
+                <div style={{flex:1}}>
+                  <label style={{fontSize:11,color:"#7a6e60",display:"block",marginBottom:3}}>Precio (vacío = igual)</label>
+                  <input type="number" value={v.precio===null||v.precio===undefined?"":v.precio} onChange={e=>upVar(i,"precio",e.target.value)} placeholder={String(form.precio||0)} style={{...I()}}/>
+                </div>
+                <div style={{flex:1}}>
+                  <label style={{fontSize:11,color:"#7a6e60",display:"block",marginBottom:3}}>Stock</label>
+                  <input type="number" value={v.stock===null||v.stock===undefined?"":v.stock} onChange={e=>upVar(i,"stock",e.target.value)} style={{...I()}}/>
+                </div>
+                <div style={{width:64}}>
+                  <label style={{fontSize:11,color:"#7a6e60",display:"block",marginBottom:3}}>Emoji</label>
+                  <input value={v.emoji||""} onChange={e=>upVar(i,"emoji",e.target.value)} style={{...I(),textAlign:"center"}}/>
+                </div>
+              </div>
+            </div>
+          ))}
+          <button onClick={addVar} style={{...B("transparent",{color:"#c8902a",border:"1.5px dashed #c8902a"}),padding:10,fontSize:13}}>+ Agregar variante</button>
+        </div>
+
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:20}}>
+          <input type="checkbox" id="actv" checked={!!form.activo} onChange={e=>s("activo",e.target.checked)} style={{width:16,height:16}}/>
+          <label htmlFor="actv" style={{fontSize:14,cursor:"pointer"}}>Visible en tienda</label>
+        </div>
+
+        <button onClick={()=>onGuardar(form)} style={{...B(),marginBottom:10}}>Guardar cambios</button>
+
+        {form.id&&!conf&&<button onClick={()=>setConf(true)} style={{...B("transparent",{color:"#c0392b",border:"1.5px solid #c0392b"})}}>Eliminar producto</button>}
+        {conf&&(
+          <div style={{background:"rgba(192,57,43,0.06)",border:"1px solid rgba(192,57,43,0.2)",borderRadius:12,padding:"14px 16px",textAlign:"center"}}>
+            <div style={{fontSize:13,marginBottom:12,color:"#c0392b"}}>¿Seguro que quieres eliminar este producto?</div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>onElim(form.id)} style={{...B("#c0392b",{flex:1})}}>Sí, eliminar</button>
+              <button onClick={()=>setConf(false)} style={{...B("transparent",{flex:1,color:"#2e2416",border:"1.5px solid #e0d8cc"})}}>Cancelar</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── CONFIG FORM ── */
+function ConfigForm({cfg,onGuardar}){
+  const [items,setItems]=useState(cfg.map(c=>({...c})));
+  const LABELS={whatsapp:"WhatsApp (con código de país)",banco:"Banco",titular:"Titular de cuenta",clabe:"CLABE (18 dígitos)",cuenta:"Número de cuenta",concepto:"Concepto de pago"};
+  const set=(clave,valor)=>setItems(pr=>pr.map(i=>i.clave===clave?{...i,valor}:i));
+  return(
+    <div>
+      <div style={{background:"white",borderRadius:16,border:"1px solid #e0d8cc",padding:20,marginBottom:16}}>
+        <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.3rem",marginBottom:20}}>Cuenta bancaria y contacto</div>
+        {items.map(item=>(
+          <div key={item.clave} style={{marginBottom:14}}>
+            <label style={{fontSize:12,color:"#7a6e60",display:"block",marginBottom:4}}>{LABELS[item.clave]||item.clave}</label>
+            <input value={item.valor||""} onChange={e=>set(item.clave,e.target.value)} style={{...I(),background:"#faf7f2"}}/>
+          </div>
+        ))}
+        <button onClick={()=>onGuardar(items)} style={{...B(),marginTop:4}}>Guardar configuración</button>
+      </div>
+    </div>
+  );
+}
+
+/* ── CUENTAS: ENTRAR / REGISTRARSE ── */
+const errAuth=d=>{
+  const m=(d&&(d.msg||d.error_description||d.message||d.error))||"Ocurrió un error. Intenta de nuevo.";
+  const l=String(m).toLowerCase();
+  if(l.includes("already registered")||l.includes("already been registered"))return "Ese correo ya tiene cuenta. Inicia sesión.";
+  if(l.includes("invalid login"))return "Correo o contraseña incorrectos.";
+  if(l.includes("not confirmed"))return "Primero confirma tu correo: te enviamos un enlace.";
+  if(l.includes("at least"))return "La contraseña debe tener al menos 6 caracteres.";
+  if(l.includes("rate limit")||l.includes("security purposes"))return "Demasiados intentos. Espera unos minutos e inténtalo de nuevo.";
+  if(l.includes("valid email")||l.includes("invalid format")||l.includes("unable to validate email"))return "Escribe un correo válido.";
+  return m;
+};
+const modalBox={position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:600,display:"flex",alignItems:"center",justifyContent:"center",padding:16};
+const cardBox={background:"#faf7f2",borderRadius:20,width:"min(100%,380px)",maxHeight:"92vh",overflowY:"auto",padding:"24px 22px"};
+
+function AuthModal({onClose,onSession}){
+  const [mode,setMode]=useState("login");
+  const [f,setF]=useState({email:"",pass:"",nombre:"",tel:""});
+  const [msg,setMsg]=useState(null);
+  const [busy,setBusy]=useState(false);
+  const set=(k,v)=>setF(pr=>({...pr,[k]:v}));
+  const cambiar=m=>{setMode(m);setMsg(null);};
+  const enviar=async()=>{
+    const email=f.email.trim().toLowerCase();
+    if(!/^\S+@\S+\.\S+$/.test(email)){setMsg({t:"err",m:"Escribe un correo válido."});return;}
+    if(mode!=="forgot"&&f.pass.length<6){setMsg({t:"err",m:"La contraseña debe tener al menos 6 caracteres."});return;}
+    if(mode==="signup"&&!f.nombre.trim()){setMsg({t:"err",m:"Escribe tu nombre."});return;}
+    setBusy(true);setMsg(null);
+    try{
+      if(mode==="forgot"){
+        const r=await authFetch("recover",{email});
+        setMsg(r.ok?{t:"ok",m:"Si ese correo tiene cuenta, te enviamos un enlace para crear una nueva contraseña."}:{t:"err",m:errAuth(r.data)});
+      }else if(mode==="signup"){
+        const r=await authFetch("signup",{email,password:f.pass,data:{nombre:f.nombre.trim(),telefono:f.tel.trim()}});
+        if(!r.ok)setMsg({t:"err",m:errAuth(r.data)});
+        else if(r.data.access_token){const n=normSess(r.data);saveSess(n);onSession(n);}
+        else setMsg({t:"ok",m:"¡Cuenta creada! Revisa tu correo y toca el enlace para confirmarla; después inicia sesión."});
+      }else{
+        const r=await authFetch("token?grant_type=password",{email,password:f.pass});
+        if(r.ok&&r.data.access_token){const n=normSess(r.data);saveSess(n);onSession(n);}
+        else setMsg({t:"err",m:errAuth(r.data)});
+      }
+    }catch(e){setMsg({t:"err",m:"Sin conexión. Inténtalo de nuevo."});}
+    setBusy(false);
+  };
+  const tabBtn=(k,l)=><button onClick={()=>cambiar(k)} style={{flex:1,padding:"9px 0",border:"none",borderBottom:"2px solid "+(mode===k?"#c8902a":"#e0d8cc"),background:"transparent",color:mode===k?"#c8902a":"#7a6e60",cursor:"pointer",fontSize:14,fontWeight:500}}>{l}</button>;
+  return(
+    <div style={modalBox} onClick={onClose}>
+      <div style={cardBox} onClick={e=>e.stopPropagation()}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.5rem",fontWeight:600}}>☽ {mode==="forgot"?"Recuperar acceso":"Tu cuenta"}</div>
+          <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:"#7a6e60"}}>✕</button>
+        </div>
+        {mode!=="forgot"&&<div style={{display:"flex",marginBottom:16}}>{tabBtn("login","Entrar")}{tabBtn("signup","Crear cuenta")}</div>}
+        {mode==="signup"&&<>
+          <input value={f.nombre} onChange={e=>set("nombre",e.target.value)} placeholder="Nombre completo" autoComplete="name" style={{...I(),marginBottom:8}}/>
+          <input value={f.tel} onChange={e=>set("tel",e.target.value.replace(/\D/g,"").slice(0,10))} placeholder="Teléfono (10 dígitos)" inputMode="numeric" autoComplete="tel" style={{...I(),marginBottom:8}}/>
+        </>}
+        <input type="email" value={f.email} onChange={e=>set("email",e.target.value)} placeholder="Correo electrónico" autoComplete="email" style={{...I(),marginBottom:8}}/>
+        {mode!=="forgot"&&<input type="password" value={f.pass} onChange={e=>set("pass",e.target.value)} onKeyDown={e=>e.key==="Enter"&&enviar()} placeholder="Contraseña (mínimo 6 caracteres)" autoComplete={mode==="signup"?"new-password":"current-password"} style={{...I(),marginBottom:8}}/>}
+        {msg&&<div style={{margin:"4px 0 10px",padding:"8px 12px",borderRadius:10,fontSize:13,lineHeight:1.5,background:msg.t==="ok"?"rgba(34,139,34,0.08)":"rgba(200,50,50,0.08)",color:msg.t==="ok"?"#2d7a2d":"#c0392b"}}>{msg.m}</div>}
+        <button onClick={enviar} disabled={busy} style={{...B(),marginTop:6,opacity:busy?0.6:1}}>{busy?"Un momento…":mode==="login"?"Entrar":mode==="signup"?"Crear mi cuenta":"Enviar enlace"}</button>
+        <div style={{textAlign:"center",marginTop:14,fontSize:13}}>
+          {mode==="login"&&<button onClick={()=>cambiar("forgot")} style={{background:"none",border:"none",color:"#7a6e60",textDecoration:"underline",cursor:"pointer",fontSize:13}}>¿Olvidaste tu contraseña?</button>}
+          {mode==="forgot"&&<button onClick={()=>cambiar("login")} style={{background:"none",border:"none",color:"#7a6e60",textDecoration:"underline",cursor:"pointer",fontSize:13}}>Volver a iniciar sesión</button>}
+        </div>
+        {mode==="signup"&&<div style={{fontSize:11,color:"#7a6e60",textAlign:"center",marginTop:12,lineHeight:1.5}}>Con tu cuenta puedes ver el status de tus pedidos cuando los actualicemos.</div>}
+      </div>
+    </div>
+  );
+}
+
+function RecoverModal({sess,onClose,onDone}){
+  const [p1,setP1]=useState("");
+  const [p2,setP2]=useState("");
+  const [msg,setMsg]=useState("");
+  const [busy,setBusy]=useState(false);
+  const guardar=async()=>{
+    if(p1.length<6){setMsg("La contraseña debe tener al menos 6 caracteres.");return;}
+    if(p1!==p2){setMsg("Las contraseñas no coinciden.");return;}
+    setBusy(true);setMsg("");
+    try{
+      const r=await authFetch("user",{password:p1},"PUT",sess.access_token);
+      if(r.ok){saveSess(sess);onDone(sess);}else setMsg(errAuth(r.data));
+    }catch(e){setMsg("Sin conexión. Inténtalo de nuevo.");}
+    setBusy(false);
+  };
+  return(
+    <div style={modalBox}>
+      <div style={cardBox}>
+        <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.5rem",fontWeight:600,marginBottom:14}}>☽ Nueva contraseña</div>
+        <input type="password" value={p1} onChange={e=>setP1(e.target.value)} placeholder="Nueva contraseña" autoComplete="new-password" style={{...I(),marginBottom:8}}/>
+        <input type="password" value={p2} onChange={e=>setP2(e.target.value)} onKeyDown={e=>e.key==="Enter"&&guardar()} placeholder="Repite la contraseña" autoComplete="new-password" style={{...I(),marginBottom:8}}/>
+        {msg&&<div style={{margin:"4px 0 10px",padding:"8px 12px",borderRadius:10,fontSize:13,background:"rgba(200,50,50,0.08)",color:"#c0392b"}}>{msg}</div>}
+        <button onClick={guardar} disabled={busy} style={{...B(),opacity:busy?0.6:1}}>{busy?"Guardando…":"Guardar contraseña"}</button>
+        <button onClick={onClose} style={{display:"block",margin:"12px auto 0",background:"none",border:"none",color:"#7a6e60",textDecoration:"underline",cursor:"pointer",fontSize:13}}>Cancelar</button>
+      </div>
+    </div>
+  );
+}
+
+/* ── MIS PEDIDOS (cliente) ── */
+const FLUJO=[["nuevo","Recibido"],["confirmado","Confirmado"],["enviado","En camino"],["entregado","Entregado"]];
+const MSG_ST={
+  nuevo:"Recibimos tu pedido. Lo revisaremos y te confirmaremos en breve.",
+  confirmado:"Tu pedido está confirmado. Realiza tu pago y envía el comprobante por WhatsApp.",
+  enviado:"¡Tu pedido va en camino!",
+  entregado:"Pedido entregado. ¡Gracias por tu compra!",
+  cancelado:"Este pedido fue cancelado. Escríbenos por WhatsApp si tienes dudas.",
+};
+function Progreso({status}){
+  if(status==="cancelado")return <div style={{padding:"8px 12px",borderRadius:10,background:"rgba(192,57,43,0.08)",color:"#c0392b",fontSize:13}}>❌ Pedido cancelado</div>;
+  const idx=Math.max(0,FLUJO.findIndex(x=>x[0]===status));
+  return(
+    <div style={{display:"flex",alignItems:"flex-start"}}>
+      {FLUJO.map(([k,l],i)=>(
+        <div key={k} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",position:"relative"}}>
+          {i>0&&<div style={{position:"absolute",top:11,right:"50%",width:"100%",height:3,background:i<=idx?"#c8902a":"#e0d8cc"}}/>}
+          <div style={{position:"relative",zIndex:1,width:24,height:24,borderRadius:"50%",background:i<=idx?"#c8902a":"white",border:"2px solid "+(i<=idx?"#c8902a":"#e0d8cc"),color:"white",fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}}>{i<=idx?"✓":""}</div>
+          <div style={{fontSize:11,marginTop:6,textAlign:"center",color:i<=idx?"#2e2416":"#9a8f80",fontWeight:i===idx?600:400}}>{l}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+function MisPedidos({sess,cfg,onClose,onLogout}){
+  const [peds,setPeds]=useState(null);
+  const [error,setError]=useState(false);
+  const [abierto,setAbierto]=useState(null);
+  const [items,setItems]=useState({});
+  const [ticket,setTicket]=useState(null);
+  const [act,setAct]=useState(null);
+  const meta=(sess.user&&sess.user.user_metadata)||{};
+
+  const cargar=async()=>{
+    try{
+      const sv=await validSess();
+      if(!sv){onLogout();return;}
+      const r=await udb(sv.access_token,"pedidos","GET",null,"?select=*&user_id=eq."+sv.user.id+"&order=created_at.desc");
+      if(Array.isArray(r)){setPeds(r);setError(false);setAct(new Date());}else setError(true);
+    }catch(e){setError(true);}
+  };
+  useEffect(()=>{cargar();const iv=setInterval(cargar,30000);return()=>clearInterval(iv);},[]);
+
+  const abrir=async(ped)=>{
+    const nuevo=abierto===ped.id?null:ped.id;
+    setAbierto(nuevo);
+    if(nuevo&&!items[ped.id]){
+      const sv=await validSess();if(!sv)return;
+      const r=await udb(sv.access_token,"pedido_items","GET",null,"?pedido_id=eq."+ped.id+"&select=*");
+      if(Array.isArray(r))setItems(m=>({...m,[ped.id]:r}));
+    }
+  };
+  const verTicket=ped=>setTicket({folio:ped.folio,fecha:ped.created_at,nombre:ped.cliente_nombre,telefono:ped.cliente_telefono,dir:ped.cliente_calle+", Col. "+ped.cliente_colonia+", CP "+ped.cliente_cp+(ped.cliente_alcaldia?", "+ped.cliente_alcaldia:""),items:(items[ped.id]||[]).map(i=>({nombre:i.nombre,precio:i.precio,cantidad:i.cantidad})),total:ped.total,envio:ped.tipo_envio});
+
+  return(
+    <div style={{position:"fixed",inset:0,background:"#faf7f2",zIndex:650,overflowY:"auto"}}>
+      <div style={{maxWidth:480,margin:"0 auto",padding:"0 16px 60px"}}>
+        <div style={{position:"sticky",top:0,background:"rgba(250,247,242,0.96)",backdropFilter:"blur(10px)",padding:"16px 0 12px",borderBottom:"1px solid #e0d8cc",display:"flex",justifyContent:"space-between",alignItems:"center",zIndex:2}}>
+          <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.6rem",fontWeight:600}}>📦 Mis pedidos</div>
+          <button onClick={onClose} style={{width:36,height:36,border:"1.5px solid #e0d8cc",borderRadius:"50%",background:"transparent",cursor:"pointer",fontSize:15,color:"#7a6e60"}}>✕</button>
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",margin:"14px 0 6px",gap:10}}>
+          <div style={{fontSize:13,lineHeight:1.4,minWidth:0}}>
+            <div style={{fontWeight:500}}>{meta.nombre||"Mi cuenta"}</div>
+            <div style={{color:"#7a6e60",overflow:"hidden",textOverflow:"ellipsis"}}>{sess.user&&sess.user.email}</div>
+          </div>
+          <button onClick={onLogout} style={{padding:"6px 14px",border:"1.5px solid #e0d8cc",borderRadius:50,background:"transparent",cursor:"pointer",fontSize:12,whiteSpace:"nowrap"}}>Cerrar sesión</button>
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,fontSize:11,color:"#7a6e60"}}>
+          <span>Se actualiza solo cada 30 s{act?" · "+act.toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"}):""}</span>
+          <button onClick={cargar} style={{padding:"4px 12px",border:"1.5px solid #c8902a",borderRadius:50,background:"transparent",color:"#c8902a",cursor:"pointer",fontSize:12}}>↻ Actualizar</button>
+        </div>
+
+        {peds===null&&!error&&<Spin/>}
+        {error&&<div style={{textAlign:"center",padding:"40px 10px",color:"#7a6e60",fontSize:14}}>No pudimos cargar tus pedidos. Inténtalo de nuevo en unos minutos.</div>}
+        {peds&&peds.length===0&&<div style={{textAlign:"center",padding:"50px 10px",color:"#7a6e60",fontSize:14,lineHeight:1.6}}>🌙 Aún no tienes pedidos con esta cuenta.<br/>Los que hagas con tu sesión iniciada aparecerán aquí.</div>}
+        {peds&&peds.map(ped=>(
+          <div key={ped.id} style={{background:"white",borderRadius:16,border:"1px solid #e0d8cc",padding:"14px 16px",marginBottom:12}}>
+            <div onClick={()=>abrir(ped)} style={{cursor:"pointer"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+                <div>
+                  <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:18,fontWeight:600}}>{ped.folio}</div>
+                  <div style={{fontSize:12,color:"#7a6e60"}}>{fmtFecha(ped.created_at)}</div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontSize:16,fontWeight:600,color:"#c8902a"}}>{money(ped.total)}</div>
+                  <span style={{fontSize:11,padding:"2px 8px",borderRadius:50,background:(ST_COLORS[ped.status]||"#999")+"22",color:ST_COLORS[ped.status]||"#999"}}>{ST_LABELS[ped.status]||ped.status}</span>
+                </div>
+              </div>
+              <Progreso status={ped.status}/>
+              <div style={{fontSize:13,color:"#5a4e40",marginTop:12,lineHeight:1.5}}>{MSG_ST[ped.status]||""}</div>
+              <div style={{fontSize:12,color:"#c8902a",marginTop:8}}>{abierto===ped.id?"Ocultar detalle ▲":"Ver detalle ▼"}</div>
+            </div>
+            {abierto===ped.id&&(
+              <div style={{marginTop:10,borderTop:"1px dashed #e0d8cc",paddingTop:10}}>
+                {!items[ped.id]&&<div style={{fontSize:12,color:"#7a6e60"}}>Cargando…</div>}
+                {(items[ped.id]||[]).map(it=>(
+                  <div key={it.id} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"4px 0"}}>
+                    <span>{it.nombre}{it.cantidad>1?" ×"+it.cantidad:""}</span>
+                    <span style={{color:"#c8902a"}}>{money(it.precio*it.cantidad)}</span>
+                  </div>
+                ))}
+                <div style={{fontSize:12,color:"#7a6e60",marginTop:6}}>📍 {ped.cliente_calle}, Col. {ped.cliente_colonia}, CP {ped.cliente_cp}</div>
+                <div style={{fontSize:12,color:"#7a6e60"}}>{ped.tipo_envio==="cobertura"?"🚚 Envío sin costo":"📦 Paquetería"}</div>
+                {items[ped.id]&&<button onClick={()=>verTicket(ped)} style={{...B("#c8902a"),marginTop:12,padding:10,fontSize:13}}>🧾 Ver ticket</button>}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      {ticket&&<Ticket t={ticket} cfg={cfg} onClose={()=>setTicket(null)}/>}
+    </div>
+  );
+}
+
+/* ── SURTIDO Y EMBARQUES: pantallas de operación, sin catálogo ── */
+const obtenerRol=async(token,uid)=>{
+  if(!token||!uid)return null;
+  const r=await udb(token,"roles_usuario","GET",null,"?select=rol&user_id=eq."+uid);
+  return Array.isArray(r)&&r[0]&&r[0].rol?r[0].rol:null;
+};
+const OPS={
+  surtidor:{
+    titulo:"📋 Surtir pedidos",
+    tabs:[
+      {status:"nuevo",label:"Por surtir",orden:"created_at.asc",limite:0,vacio:"🌙 No hay pedidos por surtir"},
+      {status:"confirmado",label:"Surtidos",orden:"created_at.desc",limite:20,vacio:"Aún no hay pedidos surtidos"},
+    ],
+    accion:{rpc:"surtir_pedido",hacia:"confirmado",label:"✅ Confirmar pedido",cargando:"Confirmando…",pregunta:"¿Confirmar el pedido ",hecho:" confirmado"},
+    telefono:false,
+  },
+  embarques:{
+    titulo:"🚚 Embarques",
+    tabs:[
+      {status:"confirmado",label:"Por despachar",orden:"created_at.asc",limite:0,vacio:"🌙 No hay pedidos por despachar"},
+      {status:"enviado",label:"En ruta",orden:"created_at.desc",limite:20,vacio:"Aún no hay pedidos en ruta"},
+    ],
+    accion:{rpc:"despachar_pedido",hacia:"enviado",label:"🚚 Despachar a ruta",cargando:"Despachando…",pregunta:"¿Despachar a ruta el pedido ",hecho:" despachado a ruta"},
+    telefono:true,
+  },
+};
+const cargarOperacion=async(token,cfg)=>{
+  const listas=await Promise.all(cfg.tabs.map(t=>udb(token,"pedidos","GET",null,"?select=*&status=eq."+t.status+"&order="+t.orden+(t.limite?"&limit="+t.limite:""))));
+  if(listas.some(l=>!Array.isArray(l)))return null;
+  const peds=listas.flat();
+  const items={};
+  if(peds.length){
+    const it=await udb(token,"pedido_items","GET",null,"?select=*&pedido_id=in.("+peds.map(x=>x.id).join(",")+")");
+    if(Array.isArray(it))it.forEach(x=>{(items[x.pedido_id]=items[x.pedido_id]||[]).push(x);});
+  }
+  return {listas,items};
+};
+const ejecutarAccion=async(token,rpc,id)=>{
+  const r=await fetch(SB_URL+"/rest/v1/rpc/"+rpc,{method:"POST",headers:{"apikey":SB_KEY,"Authorization":"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({p_id:String(id)})});
+  if(r.ok)return {ok:true};
+  const j=await r.json().catch(()=>({}));
+  return {ok:false,msg:(j&&(j.message||j.hint))||"No se pudo completar la acción."};
+};
+const hace=(d,ahora=Date.now())=>{
+  const m=Math.max(0,Math.round((ahora-new Date(d).getTime())/60000));
+  if(m<1)return "hace un momento";
+  if(m<60)return "hace "+m+" min";
+  const h=Math.floor(m/60);
+  if(h<24)return "hace "+h+" h";
+  const dd=Math.floor(h/24);
+  return "hace "+dd+(dd===1?" día":" días");
+};
+function Operacion({rol,sess,onLogout}){
+  const cfg=OPS[rol];
+  const [datos,setDatos]=useState(null);
+  const [error,setError]=useState("");
+  const [msg,setMsg]=useState("");
+  const [busy,setBusy]=useState(null);
+  const [tab,setTab]=useState(0);
+  const [act,setAct]=useState(null);
+  const avisar=m=>{setMsg(m);setTimeout(()=>setMsg(""),3500);};
+
+  const cargar=async()=>{
+    try{
+      const sv=await validSess();
+      if(!sv){onLogout();return;}
+      const r=await cargarOperacion(sv.access_token,cfg);
+      if(!r){setError("No se pudieron cargar los pedidos. Revisa que se haya ejecutado el SQL de roles.");return;}
+      setError("");setDatos(r);setAct(new Date());
+    }catch(e){setError("Sin conexión. Se reintentará solo.");}
+  };
+  useEffect(()=>{cargar();const iv=setInterval(cargar,30000);return()=>clearInterval(iv);},[]);
+
+  const accionar=async(ped)=>{
+    if(!window.confirm(cfg.accion.pregunta+ped.folio+"?"))return;
+    setBusy(ped.id);
+    try{
+      const sv=await validSess();
+      if(!sv){onLogout();return;}
+      const r=await ejecutarAccion(sv.access_token,cfg.accion.rpc,ped.id);
+      if(r.ok){
+        setDatos(d=>({...d,listas:[d.listas[0].filter(x=>x.id!==ped.id),[{...ped,status:cfg.accion.hacia},...d.listas[1]]]}));
+        avisar("✅ Pedido "+ped.folio+cfg.accion.hecho);
+      }else{avisar("⚠️ "+r.msg);cargar();}
+    }catch(e){avisar("⚠️ Sin conexión. Inténtalo de nuevo.");}
+    setBusy(null);
+  };
+
+  const lista=datos?datos.listas[tab]:[];
+  const tabBtn=(k)=><button key={k} onClick={()=>setTab(k)} style={{flex:1,padding:"10px 0",border:"none",borderBottom:"2px solid "+(tab===k?"#c8902a":"#e0d8cc"),background:"transparent",color:tab===k?"#c8902a":"#7a6e60",cursor:"pointer",fontSize:14,fontWeight:500}}>{cfg.tabs[k].label}{datos?" ("+datos.listas[k].length+")":""}</button>;
+
+  return(
+    <div style={{minHeight:"100vh",background:"#faf7f2"}}>
+      <div style={{maxWidth:480,margin:"0 auto",padding:"0 16px 70px"}}>
+        <div style={{position:"sticky",top:0,background:"rgba(250,247,242,0.96)",backdropFilter:"blur(10px)",padding:"16px 0 12px",borderBottom:"1px solid #e0d8cc",display:"flex",justifyContent:"space-between",alignItems:"center",zIndex:2}}>
+          <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.6rem",fontWeight:600}}>{cfg.titulo}</div>
+          <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:18,color:"#c8902a"}}>☽ Aether</div>
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",margin:"12px 0 4px",gap:8}}>
+          <div style={{fontSize:12,color:"#7a6e60",overflow:"hidden",textOverflow:"ellipsis"}}>{sess.user&&sess.user.email}</div>
+          <button onClick={onLogout} style={{padding:"5px 12px",border:"1.5px solid #e0d8cc",borderRadius:50,background:"transparent",cursor:"pointer",fontSize:11,whiteSpace:"nowrap"}}>Cerrar sesión</button>
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6,fontSize:11,color:"#7a6e60"}}>
+          <span>Se actualiza solo cada 30 s{act?" · "+act.toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"}):""}</span>
+          <button onClick={cargar} style={{padding:"4px 12px",border:"1.5px solid #c8902a",borderRadius:50,background:"transparent",color:"#c8902a",cursor:"pointer",fontSize:12}}>↻ Actualizar</button>
+        </div>
+        <div style={{display:"flex",marginBottom:14}}>{cfg.tabs.map((t,k)=>tabBtn(k))}</div>
+
+        {error&&<div style={{padding:"10px 12px",borderRadius:10,background:"rgba(200,50,50,0.08)",color:"#c0392b",fontSize:13,lineHeight:1.5,marginBottom:12}}>{error}</div>}
+        {!datos&&!error&&<Spin/>}
+        {datos&&lista.length===0&&<div style={{textAlign:"center",padding:"50px 10px",color:"#7a6e60",fontSize:14}}>{cfg.tabs[tab].vacio}</div>}
+        {lista.map(ped=>{
+          const its=(datos&&datos.items[ped.id])||[];
+          const piezas=its.reduce((a,i)=>a+(Number(i.cantidad)||0),0);
+          return(
+            <div key={ped.id} style={{background:"white",borderRadius:16,border:"1px solid "+(tab===0?"#c8902a":"#e0d8cc"),padding:"14px 16px",marginBottom:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                <div>
+                  <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:19,fontWeight:600}}>{ped.folio}</div>
+                  <div style={{fontSize:12,color:"#7a6e60"}}>{hace(ped.created_at)} · {fmtFecha(ped.created_at)}</div>
+                </div>
+                <span style={{fontSize:11,padding:"3px 10px",borderRadius:50,background:(ST_COLORS[ped.status]||"#999")+"22",color:ST_COLORS[ped.status]||"#999",whiteSpace:"nowrap"}}>{ST_LABELS[ped.status]||ped.status}</span>
+              </div>
+              <div style={{borderTop:"1px dashed #e0d8cc",borderBottom:"1px dashed #e0d8cc",padding:"8px 0",margin:"4px 0 10px"}}>
+                {its.length===0&&<div style={{fontSize:12,color:"#7a6e60"}}>Cargando productos…</div>}
+                {its.map(it=>(
+                  <div key={it.id} style={{display:"flex",gap:10,alignItems:"baseline",fontSize:14,padding:"3px 0"}}>
+                    <b style={{minWidth:34,color:"#c8902a"}}>{it.cantidad}×</b>
+                    <span>{it.nombre}</span>
+                  </div>
+                ))}
+                {its.length>0&&<div style={{fontSize:11,color:"#7a6e60",marginTop:6}}>{piezas} {piezas===1?"pieza":"piezas"} en total</div>}
+              </div>
+              <div style={{fontSize:12,color:"#5a4e40",lineHeight:1.6}}>
+                <div>👤 {ped.cliente_nombre}</div>
+                {cfg.telefono&&ped.cliente_telefono&&<div>📞 <a href={"tel:"+ped.cliente_telefono} style={{color:"#1a6fa0"}}>{ped.cliente_telefono}</a></div>}
+                <div>📍 {ped.cliente_calle}, Col. {ped.cliente_colonia}, CP {ped.cliente_cp}{ped.cliente_alcaldia?", "+ped.cliente_alcaldia:""}</div>
+                {ped.cliente_referencias&&<div>Refs: {ped.cliente_referencias}</div>}
+                <div>{ped.tipo_envio==="cobertura"?"🚚 Entrega en zona":"📦 Paquetería"}</div>
+              </div>
+              {tab===0&&<button onClick={()=>accionar(ped)} disabled={busy===ped.id} style={{...B(rol==="embarques"?"#1a6fa0":"#2d7a2d"),marginTop:12,opacity:busy===ped.id?0.6:1}}>{busy===ped.id?cfg.accion.cargando:cfg.accion.label}</button>}
+            </div>
+          );
+        })}
+      </div>
+      {msg&&<Toast msg={msg}/>}
+    </div>
+  );
+}
+
+/* ── ADMIN DE CÓDIGOS POSTALES ── */
+const SQL_ZONAS="create table if not exists zonas_cp (\n  cp text primary key,\n  zona text not null,\n  activo boolean not null default true\n);\nalter table zonas_cp enable row level security;\ncreate policy \"zonas_cp_todo\" on zonas_cp\n  for all using (true) with check (true);";
+function ZonasCP(){
+  const [rows,setRows]=useState([]);
+  const [listo,setListo]=useState(false);
+  const [sinTabla,setSinTabla]=useState(false);
+  const [msg,setMsg]=useState("");
+  const [texto,setTexto]=useState("");
+  const [zona,setZona]=useState("");
+  const [busq,setBusq]=useState("");
+  const [zf,setZf]=useState("");
+  const [verBajas,setVerBajas]=useState(false);
+  const [ocupado,setOcupado]=useState(false);
+
+  useEffect(()=>{
+    db("zonas_cp","?select=*").then(r=>{
+      if(Array.isArray(r))setRows(r);else setSinTabla(true);
+      setListo(true);
+    }).catch(()=>{setSinTabla(true);setListo(true);});
+  },[]);
+
+  const mapa=mapaCP(rows);
+  const conteo={};Object.values(mapa).forEach(z=>{conteo[z]=(conteo[z]||0)+1;});
+  const zonas=Object.keys(conteo).sort();
+  const bajas=rows.filter(r=>r.activo===false);
+  const flash=m=>{setMsg(m);setTimeout(()=>setMsg(""),4000);};
+
+  const guardar=async(lista)=>{
+    const r=await dbup("zonas_cp",lista,"cp");
+    if(!Array.isArray(r)){setSinTabla(true);flash("❌ No se pudo guardar. Crea primero la tabla zonas_cp (instrucciones abajo).");return false;}
+    setRows(pr=>{const m=new Map(pr.map(x=>[x.cp,x]));lista.forEach(x=>m.set(x.cp,x));return [...m.values()];});
+    return true;
+  };
+  const quitarFila=async(cp)=>{await dbdel("zonas_cp","?cp=eq."+cp);setRows(pr=>pr.filter(x=>x.cp!==cp));};
+
+  const alta=async()=>{
+    const z=zona.trim();
+    if(!z){flash("⚠️ Escribe la zona (alcaldía o municipio)");return;}
+    const cps=new Set();let malos=0;
+    texto.split(/[\s,;]+/).filter(Boolean).forEach(tok=>{
+      const m=tok.match(/^(\d{5})-(\d{5})$/);
+      if(m){
+        const a=+m[1],b=+m[2];
+        if(b>=a&&b-a<=1000){for(let n=a;n<=b;n++)cps.add(String(n).padStart(5,"0"));}else malos++;
+      }else if(/^\d{5}$/.test(tok))cps.add(tok);
+      else malos++;
+    });
+    if(!cps.size){flash("⚠️ No encontré códigos postales válidos");return;}
+    setOcupado(true);
+    const ok=await guardar([...cps].map(cp=>({cp,zona:z,activo:true})));
+    setOcupado(false);
+    if(ok){setTexto("");flash("✅ "+cps.size+" CP en "+z+(malos?" · "+malos+" ignorados":""));}
+  };
+
+  const baja=async(cp,z)=>{
+    if(CP_ZONA[cp]){if(await guardar([{cp,zona:z,activo:false}]))flash("CP "+cp+" dado de baja");}
+    else{await quitarFila(cp);flash("CP "+cp+" eliminado");}
+  };
+  const restaurar=async(cp)=>{await quitarFila(cp);flash("CP "+cp+" restaurado");};
+
+  const lista=Object.entries(mapa).filter(([cp,z])=>(!zf||z===zf)&&(!busq||cp.startsWith(busq))).sort((a,b)=>a[0]<b[0]?-1:1);
+  const mostrar=lista.slice(0,60);
+  const cobertura=busq.length===5?(mapa[busq]?"✅ "+busq+" tiene cobertura ("+mapa[busq]+")":"📦 "+busq+" no tiene cobertura (paquetería)"):"";
+
+  return(
+    <div style={{background:"white",borderRadius:16,border:"1px solid #e0d8cc",padding:20,marginTop:16}}>
+      <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.3rem",marginBottom:4}}>📍 Zonas de cobertura</div>
+      <div style={{fontSize:12,color:"#7a6e60",marginBottom:16,lineHeight:1.5}}>Los códigos postales de esta lista tienen envío sin costo. Cualquier otro se envía por paquetería.</div>
+
+      {listo&&sinTabla&&(
+        <div style={{background:"rgba(200,144,42,0.08)",border:"1px solid rgba(200,144,42,0.3)",borderRadius:12,padding:"12px 14px",marginBottom:16,fontSize:12,lineHeight:1.6}}>
+          <b>Falta un paso para poder guardar cambios.</b> En Supabase abre <b>SQL Editor</b>, pega esto y toca <b>Run</b>; luego recarga esta pantalla:
+          <pre style={{background:"#1a1510",color:"#f0e8d4",padding:10,borderRadius:8,margin:"8px 0",overflowX:"auto",fontSize:11}}>{SQL_ZONAS}</pre>
+          <button onClick={()=>{try{navigator.clipboard.writeText(SQL_ZONAS);flash("Copiado");}catch(e){}}} style={{padding:"6px 14px",border:"1.5px solid #c8902a",borderRadius:50,background:"transparent",cursor:"pointer",fontSize:12}}>Copiar SQL</button>
+        </div>
+      )}
+
+      <div style={{fontSize:11,color:"#7a6e60",letterSpacing:"0.06em",marginBottom:8}}>AGREGAR CÓDIGOS POSTALES</div>
+      <input value={zona} onChange={e=>setZona(e.target.value)} list="zonas-lista" placeholder="Zona (ej. Neza, Coyoacán…)" style={{...I(),marginBottom:8}}/>
+      <datalist id="zonas-lista">{zonas.map(z=><option key={z} value={z}/>)}</datalist>
+      <textarea value={texto} onChange={e=>setTexto(e.target.value)} rows={3} placeholder={"Uno o varios CP separados por coma o espacio.\nTambién rangos: 57000-57099"} style={{...I(),resize:"vertical",marginBottom:8}}/>
+      <button onClick={alta} disabled={ocupado} style={{...B("#c8902a"),opacity:ocupado?0.6:1}}>{ocupado?"Guardando…":"Agregar a cobertura"}</button>
+
+      {msg&&<div style={{marginTop:12,padding:"8px 12px",borderRadius:10,background:msg.startsWith("✅")||msg.startsWith("CP")?"rgba(34,139,34,0.08)":"rgba(200,50,50,0.08)",fontSize:13,color:msg.startsWith("✅")||msg.startsWith("CP")?"#2d7a2d":"#c0392b"}}>{msg}</div>}
+
+      <div style={{fontSize:11,color:"#7a6e60",letterSpacing:"0.06em",margin:"22px 0 8px"}}>CONSULTAR / DAR DE BAJA</div>
+      <input value={busq} onChange={e=>setBusq(e.target.value.replace(/\D/g,"").slice(0,5))} placeholder="Buscar por código postal" inputMode="numeric" style={{...I(),marginBottom:8}}/>
+      {cobertura&&<div style={{fontSize:13,marginBottom:8}}>{cobertura}</div>}
+      <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:10}}>
+        <button onClick={()=>setZf("")} style={{padding:"5px 12px",borderRadius:50,border:"1.5px solid "+(!zf?"#c8902a":"#e0d8cc"),background:!zf?"#c8902a":"white",color:!zf?"white":"#2e2416",cursor:"pointer",fontSize:12}}>Todas ({Object.keys(mapa).length})</button>
+        {zonas.map(z=><button key={z} onClick={()=>setZf(zf===z?"":z)} style={{padding:"5px 12px",borderRadius:50,border:"1.5px solid "+(zf===z?"#c8902a":"#e0d8cc"),background:zf===z?"#c8902a":"white",color:zf===z?"white":"#2e2416",cursor:"pointer",fontSize:12}}>{z} ({conteo[z]})</button>)}
+      </div>
+      <div style={{maxHeight:320,overflowY:"auto",border:"1px solid #f0ece6",borderRadius:12}}>
+        {mostrar.length===0&&<div style={{padding:20,textAlign:"center",color:"#7a6e60",fontSize:13}}>Sin resultados</div>}
+        {mostrar.map(([cp,z])=>(
+          <div key={cp} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",borderBottom:"1px solid #f0ece6",fontSize:13}}>
+            <span><b>{cp}</b> <span style={{color:"#7a6e60"}}>· {z}</span></span>
+            <button onClick={()=>baja(cp,z)} style={{padding:"4px 12px",border:"1.5px solid #e0d8cc",borderRadius:50,background:"transparent",color:"#c0392b",cursor:"pointer",fontSize:12}}>Quitar</button>
+          </div>
+        ))}
+      </div>
+      {lista.length>60&&<div style={{fontSize:11,color:"#7a6e60",marginTop:6}}>Mostrando 60 de {lista.length}. Filtra por zona o busca un CP.</div>}
+
+      {bajas.length>0&&(
+        <div style={{marginTop:16}}>
+          <button onClick={()=>setVerBajas(v=>!v)} style={{background:"none",border:"none",cursor:"pointer",fontSize:13,color:"#7a6e60",textDecoration:"underline"}}>{verBajas?"Ocultar":"Ver"} dados de baja ({bajas.length})</button>
+          {verBajas&&<div style={{maxHeight:200,overflowY:"auto",border:"1px solid #f0ece6",borderRadius:12,marginTop:8}}>
+            {bajas.map(r=>(
+              <div key={r.cp} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",borderBottom:"1px solid #f0ece6",fontSize:13}}>
+                <span><b>{r.cp}</b> <span style={{color:"#7a6e60"}}>· {r.zona}</span></span>
+                <button onClick={()=>restaurar(r.cp)} style={{padding:"4px 12px",border:"1.5px solid #2d7a2d",borderRadius:50,background:"transparent",color:"#2d7a2d",cursor:"pointer",fontSize:12}}>Restaurar</button>
+              </div>
+            ))}
+          </div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── QR del folio y escáner con cámara ── */
+function QR({texto,size=96}){
+  let svg="";
+  try{
+    const q=window.qrcode(0,"M");q.addData(String(texto));q.make();
+    svg=q.createSvgTag({cellSize:4,margin:0,scalable:true});
+  }catch(e){return null;}
+  return <div aria-label={"QR del folio "+texto} style={{width:size,height:size,margin:"0 auto"}} dangerouslySetInnerHTML={{__html:svg}}/>;
+}
+
+function Escaner({onFolio,onClose}){
+  const vref=useRef(null);
+  const [msg,setMsg]=useState("Apunta la cámara al QR del ticket");
+  const soporta=typeof window!=="undefined"&&"BarcodeDetector" in window;
+  useEffect(()=>{
+    if(!soporta||!navigator.mediaDevices){setMsg("Este navegador no puede leer QR con la cámara. Escribe el folio en el buscador, o usa Chrome en Android.");return;}
+    let stream=null,timer=null,vivo=true;
+    const det=new window.BarcodeDetector({formats:["qr_code"]});
+    navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"}}}).then(st=>{
+      if(!vivo){st.getTracks().forEach(t=>t.stop());return;}
+      stream=st;const v=vref.current;if(!v)return;v.srcObject=st;v.play().catch(()=>{});
+      timer=setInterval(async()=>{
+        try{const r=await det.detect(v);if(r&&r[0]&&r[0].rawValue){clearInterval(timer);onFolio(r[0].rawValue);}}catch(e){}
+      },400);
+    }).catch(()=>setMsg("No se pudo abrir la cámara. Revisa el permiso del navegador."));
+    return()=>{vivo=false;if(timer)clearInterval(timer);if(stream)stream.getTracks().forEach(t=>t.stop());};
+  },[]);
+  return(
+    <div style={{position:"fixed",inset:0,zIndex:400,background:"rgba(10,8,4,0.92)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16,padding:20}}>
+      <div style={{color:"#f0e8d4",fontFamily:"'Cormorant Garamond',serif",fontSize:"1.4rem"}}>📷 Escanear ticket</div>
+      {soporta&&<video ref={vref} playsInline muted style={{width:"min(100%,360px)",aspectRatio:"1",objectFit:"cover",borderRadius:16,border:"2px solid #c8902a",background:"#000"}}/>}
+      <div style={{color:"rgba(240,232,212,0.75)",fontSize:13,textAlign:"center",maxWidth:320}}>{msg}</div>
+      <button onClick={onClose} style={{padding:"11px 28px",borderRadius:50,border:"1.5px solid rgba(240,232,212,0.5)",background:"transparent",color:"#f0e8d4",cursor:"pointer",fontSize:14}}>Cerrar</button>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════
+   APP ROOT
+══════════════════════════════════════════════ */
+function App(){
+  return <Tienda/>;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
