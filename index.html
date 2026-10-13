@@ -506,7 +506,7 @@ function Tienda(){
 
   if(sess&&rol===undefined)return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Cormorant Garamond',serif",fontSize:"1.5rem",color:"#c8902a"}}>☽ Cargando…</div>;
   if(sess&&rol==="admin")return <AdminGate sess={sess} onSalir={cerrarSesion}/>;
-  if(sess&&(rol==="surtidor"||rol==="embarques"))return <Operacion rol={rol} sess={sess} onLogout={cerrarSesion}/>;
+  if(sess&&(rol==="surtidor"||rol==="embarques"||rol==="chofer"))return <Operacion rol={rol} sess={sess} onLogout={cerrarSesion}/>;
   if(loading)return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Cormorant Garamond',serif",fontSize:"1.5rem",color:"#c8902a"}}>☽ Cargando…</div>;
 
   return(
@@ -911,6 +911,7 @@ function DetallePed({ped,cfg,onClose,onSt}){
           </div>
         </div>
         {ped.enviado_en&&<div style={{marginBottom:8,padding:"8px 12px",borderRadius:10,background:"rgba(26,111,160,0.08)",color:"#1a6fa0",fontSize:12}}>🚚 Despachado a ruta por embarques · {new Date(ped.enviado_en).toLocaleString("es-MX",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</div>}
+        {ped.entregado_por&&ped.entregado_en&&<div style={{marginBottom:8,padding:"8px 12px",borderRadius:10,background:"rgba(26,111,160,0.08)",color:"#1a6fa0",fontSize:12}}>🚚 Entregado por el chófer · {new Date(ped.entregado_en).toLocaleString("es-MX",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</div>}
         {ped.confirmado_en&&<div style={{marginBottom:12,padding:"8px 12px",borderRadius:10,background:"rgba(34,139,34,0.08)",color:"#2d7a2d",fontSize:12}}>✅ Confirmado por el surtidor · {new Date(ped.confirmado_en).toLocaleString("es-MX",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</div>}
         <button onClick={()=>setVerTicket(true)} style={{...B("#c8902a"),marginBottom:10}}>🧾 Ver ticket de venta</button>
         <button onClick={notif} style={{...B("#25D366")}}>Notificar al cliente por WhatsApp 📲</button>
@@ -1332,6 +1333,7 @@ const OPS={
     ],
     accion:{rpc:"surtir_pedido",hacia:"confirmado",label:"✅ Confirmar pedido",cargando:"Confirmando…",pregunta:"¿Confirmar el pedido ",hecho:" confirmado"},
     telefono:false,
+    color:"#2d7a2d",
   },
   embarques:{
     titulo:"🚚 Embarques",
@@ -1341,6 +1343,18 @@ const OPS={
     ],
     accion:{rpc:"despachar_pedido",hacia:"enviado",label:"🚚 Despachar a ruta",cargando:"Despachando…",pregunta:"¿Despachar a ruta el pedido ",hecho:" despachado a ruta"},
     telefono:true,
+    color:"#1a6fa0",
+  },
+  chofer:{
+    titulo:"🛵 Mis entregas",
+    tabs:[
+      {status:"enviado",label:"Por entregar",orden:"created_at.asc",limite:0,vacio:"🌙 No hay entregas pendientes"},
+      {status:"entregado",label:"Entregadas",orden:"created_at.desc",limite:20,vacio:"Aún no hay entregas realizadas"},
+    ],
+    accion:{rpc:"entregar_pedido",hacia:"entregado",label:"🏠 Marcar entregado",cargando:"Guardando…",pregunta:"¿Confirmas que ya entregaste el pedido ",hecho:" entregado"},
+    telefono:true,
+    ruta:true,
+    color:"#5a3d8a",
   },
 };
 const cargarOperacion=async(token,cfg)=>{
@@ -1457,7 +1471,20 @@ function Operacion({rol,sess,onLogout}){
                 {ped.cliente_referencias&&<div>Refs: {ped.cliente_referencias}</div>}
                 <div>{ped.tipo_envio==="cobertura"?"🚚 Entrega en zona":"📦 Paquetería"}</div>
               </div>
-              {tab===0&&<button onClick={()=>accionar(ped)} disabled={busy===ped.id} style={{...B(rol==="embarques"?"#1a6fa0":"#2d7a2d"),marginTop:12,opacity:busy===ped.id?0.6:1}}>{busy===ped.id?cfg.accion.cargando:cfg.accion.label}</button>}
+              {cfg.ruta&&(()=>{
+                const dir=ped.cliente_calle+", "+ped.cliente_colonia+", CP "+ped.cliente_cp+(ped.cliente_alcaldia?", "+ped.cliente_alcaldia:"")+", México";
+                const tel=String(ped.cliente_telefono||"").replace(/\D/g,"");
+                const wa=tel?"https://wa.me/"+(tel.length===10?"52":"")+tel:null;
+                const bt={flex:1,textAlign:"center",padding:"9px 6px",borderRadius:50,border:"1.5px solid #e0d8cc",background:"white",color:"#2e2416",fontSize:12,textDecoration:"none",fontWeight:500};
+                return(
+                  <div style={{display:"flex",gap:6,marginTop:10}}>
+                    <a href={"https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(dir)} target="_blank" rel="noopener noreferrer" style={bt}>🗺️ Mapa</a>
+                    {tel&&<a href={"tel:"+tel} style={bt}>📞 Llamar</a>}
+                    {wa&&<a href={wa} target="_blank" rel="noopener noreferrer" style={bt}>💬 WhatsApp</a>}
+                  </div>
+                );
+              })()}
+              {tab===0&&<button onClick={()=>accionar(ped)} disabled={busy===ped.id} style={{...B(cfg.color),marginTop:12,opacity:busy===ped.id?0.6:1}}>{busy===ped.id?cfg.accion.cargando:cfg.accion.label}</button>}
             </div>
           );
         })}
