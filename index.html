@@ -703,6 +703,13 @@ function Admin({onSalir}){
   const ventasH=hoyP.filter(p=>p.status!=="cancelado").reduce((s,p)=>s+Number(p.total),0);
   const nuevos=pedidos.filter(p=>p.status==="nuevo").length;
 
+  const cambPago=async(id,pagado)=>{
+    const r=await dbw("pedidos","PATCH",{pagado},"?id=eq."+id);
+    if(!Array.isArray(r)){t("❌ No se pudo guardar. Ejecuta el SQL de pagos en Supabase.");return;}
+    setPedidos(pr=>pr.map(p=>p.id===id?{...p,pagado}:p));
+    if(detalle?.id===id)setDetalle(pr=>({...pr,pagado}));
+    t(pagado?"✦ Marcado como pagado":"✦ Marcado por cobrar");
+  };
   const cambSt=async(id,status)=>{
     await dbw("pedidos","PATCH",{status},"?id=eq."+id);
     setPedidos(pr=>pr.map(p=>p.id===id?{...p,status}:p));
@@ -865,7 +872,7 @@ function Admin({onSalir}){
         {sec==="config"&&<><ConfigForm cfg={cfg} onGuardar={guardarCfg}/><ZonasCP/></>}
       </div>
 
-      {detalle&&<DetallePed ped={detalle} cfg={Object.fromEntries(cfg.map(c=>[c.clave,c.valor]))} onClose={()=>setDetalle(null)} onSt={cambSt}/>}
+      {detalle&&<DetallePed ped={detalle} cfg={Object.fromEntries(cfg.map(c=>[c.clave,c.valor]))} onClose={()=>setDetalle(null)} onSt={cambSt} onPago={cambPago}/>}
       {editP&&<EditorProd prod={editP} onGuardar={guardarP} onClose={()=>setEditP(null)} onElim={elimP}/>}
       {toast&&<Toast msg={toast}/>}
     </div>
@@ -873,7 +880,7 @@ function Admin({onSalir}){
 }
 
 /* ── DETALLE PEDIDO ── */
-function DetallePed({ped,cfg,onClose,onSt}){
+function DetallePed({ped,cfg,onClose,onSt,onPago}){
   const [items,setItems]=useState([]);
   const [verTicket,setVerTicket]=useState(false);
   useEffect(()=>{db("pedido_items","?pedido_id=eq."+ped.id+"&select=*").then(r=>setItems(Array.isArray(r)?r:[]));}, [ped.id]);
@@ -888,6 +895,13 @@ function DetallePed({ped,cfg,onClose,onSt}){
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
           <div><div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.4rem",fontWeight:600}}>{ped.folio}</div><div style={{fontSize:12,color:"#7a6e60"}}>{new Date(ped.created_at).toLocaleDateString("es-MX",{dateStyle:"full"})}</div></div>
           <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:"#7a6e60"}}>✕</button>
+        </div>
+        <div style={{background:ped.pagado?"rgba(34,139,34,0.08)":"rgba(200,144,42,0.12)",border:"1.5px solid "+(ped.pagado?"#2d7a2d":"#c8902a"),borderRadius:14,padding:"12px 16px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
+          <div>
+            <div style={{fontWeight:600,fontSize:14,color:ped.pagado?"#2d7a2d":"#8a5f10"}}>{ped.pagado?"✅ Pedido pagado":"💵 Por cobrar: $"+ped.total}</div>
+            <div style={{fontSize:11,color:"#7a6e60",marginTop:2}}>{ped.pagado?"El chófer verá “ya pagado”":"El chófer verá “cobrar al entregar”"}</div>
+          </div>
+          <button onClick={()=>onPago(ped.id,!ped.pagado)} style={{padding:"8px 14px",borderRadius:50,border:"none",background:ped.pagado?"#e0d8cc":"#2d7a2d",color:ped.pagado?"#2e2416":"white",cursor:"pointer",fontSize:12,fontWeight:500,whiteSpace:"nowrap"}}>{ped.pagado?"Quitar pago":"Marcar pagado"}</button>
         </div>
         <div style={{background:"white",borderRadius:14,border:"1px solid #e0d8cc",padding:"14px 16px",marginBottom:14}}>
           <div style={{fontSize:11,color:"#7a6e60",marginBottom:8}}>👤 CLIENTE</div>
@@ -1354,6 +1368,7 @@ const OPS={
     accion:{rpc:"entregar_pedido",hacia:"entregado",label:"🏠 Marcar entregado",cargando:"Guardando…",pregunta:"¿Confirmas que ya entregaste el pedido ",hecho:" entregado"},
     telefono:true,
     ruta:true,
+    cobro:true,
     color:"#5a3d8a",
   },
 };
@@ -1454,6 +1469,13 @@ function Operacion({rol,sess,onLogout}){
                 </div>
                 <span style={{fontSize:11,padding:"3px 10px",borderRadius:50,background:(ST_COLORS[ped.status]||"#999")+"22",color:ST_COLORS[ped.status]||"#999",whiteSpace:"nowrap"}}>{ST_LABELS[ped.status]||ped.status}</span>
               </div>
+              {cfg.cobro&&(
+                <div style={{margin:"0 0 10px",padding:"10px 12px",borderRadius:12,textAlign:"center",border:"2px solid "+(ped.pagado?"#2d7a2d":"#c0392b"),background:ped.pagado?"rgba(34,139,34,0.08)":"rgba(192,57,43,0.08)"}}>
+                  <div style={{fontWeight:700,fontSize:14,letterSpacing:"0.03em",color:ped.pagado?"#2d7a2d":"#c0392b"}}>{ped.pagado?"✅ PEDIDO YA PAGADO":"💵 COBRAR AL ENTREGAR"}</div>
+                  <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:"1.7rem",fontWeight:700,color:"#1a1510",lineHeight:1.2}}>{ped.pagado?"No cobrar":"$"+ped.total}</div>
+                  {ped.pagado&&<div style={{fontSize:11,color:"#7a6e60"}}>Total del ticket: ${ped.total}</div>}
+                </div>
+              )}
               <div style={{borderTop:"1px dashed #e0d8cc",borderBottom:"1px dashed #e0d8cc",padding:"8px 0",margin:"4px 0 10px"}}>
                 {its.length===0&&<div style={{fontSize:12,color:"#7a6e60"}}>Cargando productos…</div>}
                 {its.map(it=>(
